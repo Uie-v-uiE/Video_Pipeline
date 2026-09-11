@@ -1,1 +1,0 @@
--debug "typical" "tb_rotate_mapper" -s "tb_rotate_mapper_snap" 
