@@ -87,15 +87,38 @@ module pl_video_top #(
     wire [11:0] cx = left_pane ? x : (x - PANE_W);
     wire [11:0] cy = (y >> 1) < IMG_H ? (y >> 1) : (IMG_H - 1);
 
-    // rotate map (3 stages)
-    wire [11:0] sx, sy;
-    wire        oob;
+    // rotate mapper (3-stage) only when angle!=0
+    wire [11:0] sx_map, sy_map;
+    wire        oob_map;
     rotate_mapper #(.IMAGE_W(IMG_W), .IMAGE_H(IMG_H)) u_rmap (
         .clk(clk_pix), .rst_n(rst_pix_n),
         .angle(angle), .enable(1'b1),
         .x_in(cx), .y_in(cy),
-        .x_out(sx), .y_out(sy), .oob(oob)
+        .x_out(sx_map), .y_out(sy_map), .oob(oob_map)
     );
+
+    // angle==0: bypass mapper with matching 3-cycle delay (no Y-flip math)
+    reg [11:0] cx_q1, cx_q2, cx_q3;
+    reg [11:0] cy_q1, cy_q2, cy_q3;
+    reg        oob_q1, oob_q2, oob_q3;
+    always @(posedge clk_pix or negedge rst_pix_n) begin
+        if (!rst_pix_n) begin
+            {cx_q1,cx_q2,cx_q3} <= 36'd0;
+            {cy_q1,cy_q2,cy_q3} <= 36'd0;
+            {oob_q1,oob_q2,oob_q3} <= 3'd1;
+        end else begin
+            cx_q1 <= cx; cx_q2 <= cx_q1; cx_q3 <= cx_q2;
+            cy_q1 <= cy; cy_q2 <= cy_q1; cy_q3 <= cy_q2;
+            oob_q1 <= (cx >= IMG_W) || (cy >= IMG_H);
+            oob_q2 <= oob_q1;
+            oob_q3 <= oob_q2;
+        end
+    end
+
+    wire        rot_on = rotate_active;
+    wire [11:0] sx = rot_on ? sx_map : cx_q3;
+    wire [11:0] sy = rot_on ? sy_map : cy_q3;
+    wire        oob = rot_on ? oob_map : oob_q3;
 
     // ---- colorbar on the fly (no BRAM, no FCLK) ----
     wire [15:0] bar_at_cxcy;
@@ -183,7 +206,6 @@ module pl_video_top #(
         end
     end
 
-    wire rot_on = rotate_active;
     wire [15:0] pipe_dout;
     wire        pipe_de;
 

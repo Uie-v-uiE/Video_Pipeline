@@ -1,8 +1,9 @@
-# Vivado / xsim (rebuild with tcl/)
+# Build / IDE
 vivado/
 vivado_sim/
 vivado_system/
 vivado_proj/
+vitis/
 *.xpr
 *.jou
 *.log
@@ -19,7 +20,7 @@ vivado_proj/
 *.sim/
 *.srcs/
 
-# Vitis: keep app sources only; platform BSP is regenerated from XSA
+# Vitis workspace: keep app src only
 vitis_udp/platform/
 vitis_udp/**/build/
 vitis_udp/**/_ide/
@@ -29,7 +30,6 @@ vitis_udp/**/*.o
 vitis_udp/**/CMakeCache.txt
 vitis_udp/**/CMakeFiles/
 vitis_udp/**/cmake_install.cmake
-vitis/
 
 # Reports / large intermediates
 output/*.ltx
@@ -42,7 +42,7 @@ __pycache__/
 *.pyc
 .venv/
 
-# OS / IDE
+# OS / editor
 Thumbs.db
 .DS_Store
 *.swp
@@ -51,5 +51,7 @@ Thumbs.db
 
 # Host media / tools
 sw/host/test.mjpeg
-tools/*.zip
-tools/ffmpeg*/
+tools/
+*.mp4
+*.mkv
+*.avi

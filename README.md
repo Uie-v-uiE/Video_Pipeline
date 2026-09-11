@@ -1,62 +1,55 @@
 # Zynq7020 以太网视频处理与 HDMI 双窗显示
 
-基于 **RK-ZYNQ7020-F（XC7Z020-CLG484-2）** 的实时视频流水线：上位机经 **UDP** 推送 RGB565 图像，PS 侧收包写入 DDR，PL 侧完成 **五种图像处理** 与 **0–359° 任意角旋转**，并以 **左原图 / 右处理结果** 双窗输出 **HDMI 1024×600**。
+上位机经 **UDP** 推送 RGB565 视频到 Zynq PS，写入 DDR；PL 侧经 AXI HP0 读出，完成 **5 种图像处理** 与 **0–359° 任意角旋转**，以 **左原图 / 右处理结果** 双窗输出 **HDMI 1024×600**。
 
-开发环境：Vivado / Vitis **2025.2.1**（竞赛推荐 2026.1 或 2025.2）。  
-许可证：MIT（见 `LICENSE`）。对应赛道：全国大学生嵌入式芯片与系统设计竞赛 **FPGA 创新设计 · AMD 自主选题**（见 `docs/COMPETITION.md`）。
-
----
-
-## 功能一览
-
-| 功能 | 说明 |
-|------|------|
-| 以太网视频 | PC → UDP:5001 → DDR → PL，源分辨率 512×300 RGB565 |
-| HDMI 输出 | 1024×600@50 MHz，左右各 512 宽，垂直 2× 放大 |
-| 图像处理 | 灰度、二值化、3×3 模糊、Sobel 边缘、反色（可组合） |
-| 图像旋转 | 按键 KEY1/KEY2，角度 0–359° |
-| 串口控制 | 115200，5 位效果字 + 源切换 / 阈值 / 本地测试图 |
-| 仿真 | 单元测试 + Python 金标图 |
-
-**说明：** 角度非 0 时，模糊与 Sobel 会自动旁路（窗口滤波在旋转坐标系下不成立）；灰度、二值、反色仍有效。详见 `docs/KNOWLEDGE.md`。
+| 项 | 值 |
+|----|-----|
+| 板卡 | RK-ZYNQ7020-F（XC7Z020-CLG484-2） |
+| 工具 | Vivado / Vitis **2025.2.1** |
+| 源分辨率 | 512×300 RGB565 |
+| 显示 | 1024×600 @ 50 MHz，左右各 512，垂直 2× |
+| 网络 | 板卡 192.168.1.10:5001，PC 192.168.1.100 |
+| 控制 | AXI GPIO @ 0x41200000，UART 115200 |
+| 许可 | MIT |
 
 ---
 
 ## 目录结构
 
 ```
-rtl/            PL 源码（顶层、视频、效果、旋转、AXI、HDMI）
-constraints/    管脚与时序约束
-tcl/            工程创建与实现脚本
-sim/            仿真顶层与用例
-sw/ps/          裸机程序（与 Vitis 工程源码保持同步）
-sw/host/        上位机 UDP 发送与一键脚本
-scripts/        金标模型、sin/cos ROM 生成
-skill/          竞赛技能包（可复用经验）
-docs/           架构、知识点、上板与赛事材料
-output/         比特流与报告输出目录
+zynq_video_pipeline/
+├── README.md                 本文件
+├── LICENSE                   MIT
+├── .gitignore
+├── rtl/                      PL 源码
+│   ├── top/                  system_top, pl_video_top, pl_demo_top
+│   ├── video/                时序、彩条、分屏、frame_buffer
+│   ├── process/              五效果流水线 + rotate/
+│   ├── axi/                  axi_frame_writer（HP0 读 DDR）
+│   ├── hdmi/                 TMDS 编码串化
+│   ├── clocks/               MMCM
+│   └── util/                 按键消抖
+├── constraints/              管脚与时序 XDC
+├── tcl/                      Vivado 一键脚本
+├── sim/                      单元仿真
+├── scripts/                  金标模型、sin/cos ROM
+├── sw/
+│   ├── ps/                   裸机源码（与 Vitis 同步）
+│   └── host/                 上位机 UDP / 一键脚本
+├── skill/                    竞赛技能包
+├── docs/                     全部设计文档
+└── output/                   bit / xsa / 报告输出
 ```
 
-与赛事推荐目录对照：`src/≈rtl+sw`，`build/≈tcl`，`board/≈上板文档与 bat`，`report/≈docs`。
+**Vivado 工程：** `vivado_system/`（由 `tcl/build_system_axigpio.tcl` 生成）  
+**Vitis 工作区：** `vitis_udp/`（Platform + app_component）  
+两者均已 `.gitignore`，可用 TCL 从零复现。
 
 ---
 
-## 画面仅窄条显示时怎么排查
+## 快速开始
 
-按顺序在串口执行（复位后、勿先按旋转键）：
-
-1. `SRC0` — 彩条应铺满左右半屏。若仍为窄条 → 查 PL 时序/HDMI，不是网络。  
-2. `FILL` — 本地渐变应铺满。若窄条 → 查 AXI→BRAM→显示。  
-3. `SRC1` + `run_sender.bat`（内置全幅动画）。若全幅正常 → 问题在视频文件/缩放。  
-4. 再试 `run_video.bat <mp4>`。
-
----
-
-## 快速上板
-
-### 1. 比特流
-
-已生成的 `output/system.bit` 可直接下载；或：
+### 1. 生成比特流
 
 ```bat
 cd /d <仓库根目录>
@@ -65,51 +58,43 @@ set VIVADO=D:\Software\Vivado\2025.2.1\Vivado\bin\vivado.bat
 %VIVADO% -mode batch -source tcl\program_system.tcl
 ```
 
-### 2. PS 应用
+### 2. Vitis 编译下载
 
-用 Vitis 打开 `vitis_udp` 工作区，Build Platform（需含 **lwip220**）后 Build `app_component`，下载 ELF。
+1. 用 Vitis 打开工作区 `vitis_udp`
+2. Platform 需含 **lwip220**（链路速率建议 `CONFIG_LINKSPEED1000`）
+3. Build Platform → Build app_component → **Run**
 
-串口 115200，应看到 `[BOOT]`、`[NET] ip=192.168.1.10`。
-
-### 3. 网络与推流
-
-- 板卡：`192.168.1.10/24`，网线接 **PS ETH**  
-- PC 网卡：`192.168.1.100/24`  
+### 3. 推流
 
 ```bat
+:: 内置动画（自检）
 sw\host\run_sender.bat
-:: 或指定视频文件（需带 H.264 解码的完整 FFmpeg）
+
+:: 真实视频（需带 H.264 的完整 FFmpeg）
 sw\host\run_video.bat D:\path\to\video.mp4
 ```
 
-上位机默认绑定源地址 `192.168.1.100`，避免双网卡路由错误。
+PC 网卡：`192.168.1.100/24`，网线接 **PS ETH**。
 
 ---
 
-## 串口命令
+## 串口命令（115200 8N1，发送加 CR+LF）
 
 | 命令 | 作用 |
 |------|------|
-| `00111` | 打开模糊+边缘+反色（左起为 bit0：灰/二值/模糊/边缘/反色） |
 | `00000` | 关闭全部效果 |
+| `10000` | 灰度 |
+| `01000` | 二值化 |
+| `00111` | 模糊+Sobel+反色 |
+| `00110` | 模糊+Sobel |
 | `SRC0` / `SRC1` | 彩条 / DDR 视频 |
 | `TH80` | 二值化阈值 |
-| `FILL` | DDR 本地渐变测试 |
-| `STAT` | 查看帧计数与网口状态 |
+| `FILL` | 2×2 诊断色块 |
+| `STAT` | 帧计数与网口状态 |
 
-第三方串口助手请设 **115200 8N1、无流控、发送加 CR+LF**。Vitis 终端默认带换行，故可直接用。
+效果位：**左起 = bit0**，顺序 gray / binary / blur / sobel / invert。
 
----
-
-## 网络参数
-
-| 项 | 值 |
-|----|-----|
-| 板卡 IP | 192.168.1.10 |
-| UDP 端口 | 5001 |
-| MAC | 00:0A:35:00:01:02 |
-| 帧格式 | RGB565 小端，512×300，一帧 307200 字节 |
-| AXI GPIO | 0x41200000 |
+**旋转时：** angle≠0 自动旁路 blur、sobel（窗口滤波与旋转坐标不兼容）；gray、binary、invert 仍有效。详见 `docs/KNOWLEDGE.md`。
 
 ---
 
@@ -117,24 +102,31 @@ sw\host\run_video.bat D:\path\to\video.mp4
 
 | 文档 | 内容 |
 |------|------|
-| `docs/ARCHITECTURE.md` | 数据通路与 PL 框图 |
-| `docs/KNOWLEDGE.md` | 学习要点与常见坑 |
-| `docs/ETH_BRINGUP.md` | 以太网调试 |
-| `docs/SYSTEM_BRINGUP.md` | 系统工程上板 |
-| `docs/COMPETITION.md` | 赛事材料清单 |
-| `docs/TIMING_REPORT.md` | 时序分析（需自行导出填写） |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 数据通路、时钟、带宽、模块框图 |
+| [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md) | 关键知识点与设计决策 |
+| [docs/ISSUES.md](docs/ISSUES.md) | 开发中遇到的问题与修复 |
+| [docs/COMPETITION.md](docs/COMPETITION.md) | 2026 AMD 自主选题提交清单 |
+| [docs/PROJECT_LAYOUT.md](docs/PROJECT_LAYOUT.md) | 工程路径与复现步骤 |
+| [docs/ETH_BRINGUP.md](docs/ETH_BRINGUP.md) | 以太网上板 |
+| [docs/SYSTEM_BRINGUP.md](docs/SYSTEM_BRINGUP.md) | 系统工程上板 |
+| [docs/ROTATION_AND_EFFECTS.md](docs/ROTATION_AND_EFFECTS.md) | 旋转与效果关系 |
+| [docs/TIMING_REPORT.md](docs/TIMING_REPORT.md) | 时序分析（需自行导出） |
+| [docs/LLM_ASSIST_LOG.md](docs/LLM_ASSIST_LOG.md) | 大模型协作记录 |
+| [skill/README.md](skill/README.md) | 可复用技能包 |
 
 ---
 
-## 仿真
+## 关键设计摘要
 
-```bat
-%VIVADO% -mode batch -source sim\run_sim.tcl
-python scripts\golden_model.py
-```
+- **PS/PL 分工：** PS 做协议与 DDR 写入；PL 做像素流水线与 HDMI
+- **控制字：** `en[4:0] | thr[7:8] | src[16]`，经 AXI GPIO GP0
+- **DDR 帧：** 0x10000000，512×300×2 = 307200 B；收满一帧 `DCacheFlush` 后再给 PL 读
+- **AXI HP0：** 64-bit，16-beat burst（AXI3 上限），每 beat 4 个 RGB565
+- **旋转：** 逆映射 + Q8 sin/cos ROM；angle=0 旁路 mapper 保持流水线对齐
+- **为何不用 EMIO：** 本板 EMIO bank 读回异常，控制走 GP0 AXI GPIO
 
 ---
 
-## 许可与说明
+## 许可与声明
 
-本仓库面向教学与 FPGA 创新竞赛使用。第三方 IP（lwIP、板级原理）遵循其原许可。使用前请根据实际原理图核对管脚与 PHY 型号。
+MIT License。面向教学与 FPGA 创新竞赛。使用前请按实际原理图核对管脚与 PHY 型号。

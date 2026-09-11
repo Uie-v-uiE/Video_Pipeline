@@ -1,9 +1,9 @@
 `timescale 1ns/1ps
-// AXI3-compatible frame fetcher (HP0): max 16 beats/burst, 64-bit data.
-// Fills frame_buffer row by row with RGB565 pixels.
+// AXI3 HP0 frame fetcher: 64-bit data, max 16 beats/burst.
+// Each beat = 4x RGB565; unpack over 4 cycles into frame_buffer.
 module axi_frame_writer #(
-    parameter IMG_W     = 640,
-    parameter IMG_H     = 360,
+    parameter IMG_W     = 512,
+    parameter IMG_H     = 300,
     parameter BASE_ADDR = 32'h1000_0000
 )(
     input  wire        clk,
@@ -16,7 +16,7 @@ module axi_frame_writer #(
     output reg  [18:0] fb_wr_addr,
     output reg  [15:0] fb_wr_data,
     output reg  [31:0] m_axi_araddr,
-    output reg  [7:0]  m_axi_arlen,   // drive [3:0] for AXI3 (0..15 => 1..16 beats)
+    output reg  [7:0]  m_axi_arlen,
     output wire [2:0]  m_axi_arsize,
     output wire [1:0]  m_axi_arburst,
     output reg         m_axi_arvalid,
@@ -26,26 +26,33 @@ module axi_frame_writer #(
     input  wire        m_axi_rvalid,
     output reg         m_axi_rready
 );
-    assign m_axi_arsize  = 3'b011; // 8 bytes
+    assign m_axi_arsize  = 3'b011; // 8 bytes / beat
     assign m_axi_arburst = 2'b01;  // INCR
 
-    // 16 beats * 4 pixels = 64 pixels per burst
-    localparam BEATS      = 16;
-    localparam PIX_PER_B  = 4;
-    localparam BURSTS_ROW = IMG_W / (BEATS * PIX_PER_B); // 10 for 640
+    localparam integer BEATS      = 16;
+    localparam integer PIX_PER_B  = 4;
+    localparam integer PIX_BURST  = BEATS * PIX_PER_B; // 64
+    localparam integer BURSTS_ROW = IMG_W / PIX_BURST; // 8
+    localparam integer ROW_BYTES  = IMG_W * 2;         // 1024
+    localparam integer BURST_BYTES = BEATS * 8;        // 128
 
-    localparam S_IDLE = 3'd0;
-    localparam S_AR   = 3'd1;
-    localparam S_R    = 3'd2;
-    localparam S_ROW  = 3'd3;
-    localparam S_DONE = 3'd4;
+    localparam [2:0] S_IDLE   = 3'd0;
+    localparam [2:0] S_AR     = 3'd1;
+    localparam [2:0] S_LOAD   = 3'd2;
+    localparam [2:0] S_UNPACK = 3'd3;
+    localparam [2:0] S_NEXT   = 3'd4;
+    localparam [2:0] S_DONE   = 3'd5;
 
     reg [2:0]  state;
-    reg [11:0] row;
-    reg [4:0]  burst_idx;
-    reg [5:0]  beat;
-    reg [1:0]  sub;
-    reg [11:0] xw;
+    reg [31:0] row;
+    reg [31:0] burst_idx;
+    reg [1:0]  up;
+    reg [31:0] xw;
+    reg [63:0] rhold;
+    reg        rlast_hold;
+
+    // 32-bit safe: row*IMG_W + xw
+    wire [31:0] wr_pix_addr = row * IMG_W + xw;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -57,91 +64,102 @@ module axi_frame_writer #(
             fb_wr_data <= 16'd0;
             m_axi_arvalid <= 1'b0;
             m_axi_araddr <= BASE_ADDR;
-            m_axi_arlen  <= 8'd15; // 16 beats
+            m_axi_arlen  <= 8'd15;
             m_axi_rready <= 1'b0;
-            row <= 12'd0;
-            burst_idx <= 5'd0;
-            beat <= 6'd0;
-            sub <= 2'd0;
-            xw <= 12'd0;
+            row <= 32'd0;
+            burst_idx <= 32'd0;
+            up <= 2'd0;
+            xw <= 32'd0;
+            rhold <= 64'd0;
+            rlast_hold <= 1'b0;
         end else begin
             fb_wr_en <= 1'b0;
             frame_done <= 1'b0;
+
             case (state)
                 S_IDLE: begin
                     frame_busy <= 1'b0;
+                    m_axi_rready <= 1'b0;
                     if (enable && frame_start) begin
-                        row <= 12'd0;
-                        burst_idx <= 5'd0;
+                        row <= 32'd0;
+                        burst_idx <= 32'd0;
+                        xw <= 32'd0;
                         frame_busy <= 1'b1;
                         m_axi_araddr <= BASE_ADDR;
                         m_axi_arlen  <= 8'd15;
                         m_axi_arvalid<= 1'b1;
-                        beat <= 6'd0;
-                        sub <= 2'd0;
-                        xw <= 12'd0;
                         state <= S_AR;
                     end
                 end
+
                 S_AR: begin
                     if (m_axi_arready) begin
                         m_axi_arvalid <= 1'b0;
                         m_axi_rready  <= 1'b1;
-                        beat <= 6'd0;
-                        sub <= 2'd0;
-                        state <= S_R;
+                        state <= S_LOAD;
                     end
                 end
-                S_R: begin
-                    if (m_axi_rvalid && m_axi_rready) begin
-                        fb_wr_en   <= 1'b1;
-                        fb_wr_addr <= row * IMG_W + xw;
-                        case (sub)
-                            2'd0: fb_wr_data <= m_axi_rdata[15:0];
-                            2'd1: fb_wr_data <= m_axi_rdata[31:16];
-                            2'd2: fb_wr_data <= m_axi_rdata[47:32];
-                            default: fb_wr_data <= m_axi_rdata[63:48];
-                        endcase
-                        if (sub == 2'd3) begin
-                            sub <= 2'd0;
-                            xw  <= xw + 12'd4;
-                        end else
-                            sub <= sub + 2'd1;
 
-                        beat <= beat + 6'd1;
-                        if (m_axi_rlast) begin
-                            m_axi_rready <= 1'b0;
-                            state <= S_ROW;
-                        end
+                S_LOAD: begin
+                    if (m_axi_rvalid && m_axi_rready) begin
+                        rhold <= m_axi_rdata;
+                        rlast_hold <= m_axi_rlast;
+                        m_axi_rready <= 1'b0;
+                        up <= 2'd0;
+                        state <= S_UNPACK;
                     end
                 end
-                S_ROW: begin
-                    if (burst_idx == BURSTS_ROW - 1) begin
-                        // row done
-                        burst_idx <= 5'd0;
-                        if (row == IMG_H - 1)
-                            state <= S_DONE;
-                        else begin
-                            row <= row + 12'd1;
-                            xw <= 12'd0;
-                            m_axi_araddr <= BASE_ADDR + ((row + 12'd1) * IMG_W * 2);
+
+                S_UNPACK: begin
+                    fb_wr_en   <= 1'b1;
+                    fb_wr_addr <= wr_pix_addr[18:0];
+                    // LE 64-bit: bytes0-1 = [15:0] = first pixel
+                    case (up)
+                        2'd0: fb_wr_data <= rhold[15:0];
+                        2'd1: fb_wr_data <= rhold[31:16];
+                        2'd2: fb_wr_data <= rhold[47:32];
+                        default: fb_wr_data <= rhold[63:48];
+                    endcase
+                    xw <= xw + 32'd1;
+                    up <= up + 2'd1;
+                    if (up == 2'd3)
+                        state <= S_NEXT;
+                end
+
+                S_NEXT: begin
+                    if (rlast_hold) begin
+                        if (burst_idx == BURSTS_ROW - 1) begin
+                            burst_idx <= 32'd0;
+                            if (row == IMG_H - 1) begin
+                                state <= S_DONE;
+                            end else begin
+                                row <= row + 32'd1;
+                                xw <= 32'd0;
+                                // 32-bit row stride, no 12-bit shift overflow
+                                m_axi_araddr <= BASE_ADDR + (row + 32'd1) * ROW_BYTES;
+                                m_axi_arlen  <= 8'd15;
+                                m_axi_arvalid<= 1'b1;
+                                state <= S_AR;
+                            end
+                        end else begin
+                            burst_idx <= burst_idx + 32'd1;
+                            m_axi_araddr <= m_axi_araddr + BURST_BYTES;
                             m_axi_arlen  <= 8'd15;
                             m_axi_arvalid<= 1'b1;
                             state <= S_AR;
                         end
                     end else begin
-                        burst_idx <= burst_idx + 5'd1;
-                        m_axi_araddr <= m_axi_araddr + (BEATS * 8);
-                        m_axi_arlen  <= 8'd15;
-                        m_axi_arvalid<= 1'b1;
-                        state <= S_AR;
+                        m_axi_rready <= 1'b1;
+                        state <= S_LOAD;
                     end
                 end
+
                 S_DONE: begin
                     frame_done <= 1'b1;
                     frame_busy <= 1'b0;
                     state <= S_IDLE;
                 end
+
                 default: state <= S_IDLE;
             endcase
         end

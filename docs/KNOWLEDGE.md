@@ -1,57 +1,92 @@
-# 关键知识点（吃透项目用）
+# 关键知识点（吃透本工程）
 
-按「必须搞懂」排序。每条都对应工程里可点开的文件。
-
----
-
-## A. 视频时序
-
-**1024×600@50 MHz** 不是标准 CEA 时序，是面板常用时：
-
-- 有效：1024×600  
-- 消隐：H 同步 44、后沿 88、前沿 188 → 行总 1344  
-- V：同步 3、后沿 6、前沿 16 → 场总 625  
-- 极性：HSYNC 高有效，VSYNC 低有效  
-
-代码：`rtl/video/video_timing_1024x600.v`  
-约束：`constraints/rk_zynq7020.xdc` 里 MMCM：VCO=750，OUT0÷15=50M，OUT1÷3=250M。
-
-**考点**：为什么像素钟 50 MHz 而不是 50.25 MHz？差 0.5% 在显示器锁相范围内。
+按「必须搞懂」排序，每条对应可打开的源文件。
 
 ---
 
-## B. 左右分屏与流水线对齐
+## A. 为何旋转时关掉 blur / sobel
 
-- 显示 1024 宽，每 pane 512。源 512×300，**垂直 2× 放大**（同一 sy 用两行）。  
-- 效果只对 **左半屏** `de && left` 跑一遍，结果写入 `line_cache`。  
-- 右半屏用同一行地址从 `line_cache` 读出，与延迟后的原图对齐。  
-- 蓝分隔线：`x==511` 或 `x==512`。
+`proc_pipeline.v`：
 
-**考点**：若 pipeline 延迟与 `x_d/cx_d` 对不齐，右屏会错位或花屏。当前按 map 3 拍 + BRAM 1 拍对齐。
+```verilog
+wire by2 = ~effect_en[2] | rotate_active;  // blur
+wire by3 = ~effect_en[3] | rotate_active;  // sobel
+```
 
----
+**blur / sobel 是 3×3 窗口滤波**，需要源图中「扫描顺序上的邻域」。  
+逆映射旋转后，屏幕上相邻像素对应的源坐标可能不相邻，窗口取到的是无关像素，结果错误。
 
-## C. 五效果位定义
+**gray / binary / invert 是点运算**，只依赖当前像素，与旋转兼容。
 
-串口字符串 **左起 = bit0**：
+| 角度 | gray | binary | blur | sobel | invert |
+|------|------|--------|------|-------|--------|
+| 0° | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 1–359° | ✓ | ✓ | ✗ 自动关 | ✗ 自动关 | ✓ |
 
-| 位 | 效果 | 模块 |
-|----|------|------|
-| 0 | 灰度 | `proc_gray.v` |
-| 1 | 二值 | `proc_binary.v`（阈值 thr） |
-| 2 | 3×3 模糊 | `proc_box_blur.v` |
-| 3 | Sobel 边缘 | `proc_sobel.v` |
-| 4 | 反色 | `proc_invert.v` |
-
-`00111` → bit2/3/4 = blur+sobel+invert。
-
-**软件坑（已修）**：以前发效果位会误清 `src_sel`；现在 `en/thr/src` 三个状态独立保存。
+角度回 0 后自动恢复，无需重发命令。若要「旋转+窗滤」，需先旋转到帧缓再滤波（多一帧延迟与带宽），本工程未做。
 
 ---
 
-## D. 任意角度旋转
+## B. 双窗流水线对齐
 
-参考工程思路：屏幕中心反算源坐标（Q8 定点）：
+- 效果链固定多级延迟；rotate_mapper 3 拍；BRAM 读 1 拍  
+- de/x/y/left 等 sideband 统一 **延迟 4 拍**  
+- angle=0 旁路 mapper 时，对 cx/cy 也做 3 拍延迟，避免 2 拍错位  
+
+对不齐的症状：右窗错位、分隔线附近花屏、效果与原图不同步。
+
+---
+
+## C. AXI HP0 拆包
+
+64-bit beat = 4×RGB565（每像素 2 字节，小端）：
+
+```
+rdata[15:0]   → 像素 0
+rdata[31:16]  → 像素 1
+rdata[47:32]  → 像素 2
+rdata[63:48]  → 像素 3
+```
+
+**每个 beat 锁存后拆 4 拍写入 BRAM**，不能每个 rvalid 只写 1 个像素。  
+行地址必须 **32 位**：`row * 512 + xw`；行字节 `row * 1024`。12 位左移会溢出回绕。
+
+诊断：`FILL` 四色块 + 细线；大色块看不出 4 像素组内错位。
+
+---
+
+## D. UDP 包为何带 offset
+
+包格式：`[u32 LE offset][RGB565 data]`
+
+UDP 不保证顺序。无 offset 时按到达顺序 memcpy，乱序即整帧错位。  
+有 offset 则写到 `DDR_BASE+offset`，乱序也能拼对。
+
+收满 307200 字节后 `Xil_DCacheFlushRange`，再 `src_sel=1`。
+
+---
+
+## E. 为何源是 512×300
+
+| 约束 | 数值 |
+|------|------|
+| 帧大小 | 512×300×2 = 307200 B |
+| BRAM | ~2.34 Mbit（7020 约 4.9 Mbit） |
+| UDP @30fps | ~74 Mbps（千兆足够） |
+| AXI 读 @60Hz | ~18 MB/s（HP0 64b@50M 峰值 400 MB/s） |
+
+再提分辨率主要卡 **片上 BRAM**，不是网口。720p 全帧放不进 7020 BRAM，需外缓存或降色深。
+
+---
+
+## F. 为何不用 EMIO GPIO
+
+本板 PS EMIO bank 读回恒 0，控制无效。改用 GP0 **AXI GPIO @ 0x41200000**。  
+控制字：`en[4:0] | thr[7:8] | src[16]`。
+
+---
+
+## G. 0–359° 逆映射
 
 ```
 xp = x - W/2;  yp = H/2 - y
@@ -60,72 +95,51 @@ yr = (-sin*xp + cos*yp) >> 8
 sx = xr + W/2;  sy = H/2 - yr
 ```
 
-- `sin_rom` / `cos_rom`：0–359°，**cos(0)=256，不能饱和成 255**  
-- `oob`：源坐标越界填黑，且 **反色不能把 OOB 变白**  
-- KEY1/KEY2：±1°，0–359 循环；当前边沿触发，无连发  
-
-**为何旋转关 blur/sobel**：见 `docs/ARCHITECTURE.md` §5。窗口滤波需要扫描连续邻域，逆映射破坏了这一点。gray/binary/invert 是点运算，与邻域无关，故可保留。
+- Q8：256=1.0；**cos(0) 必须是 256，不能 255**  
+- OOB 填黑；反色不能把 OOB 变白  
+- KEY 边沿触发 ±1°，无连发  
 
 ---
 
-## E. AXI HP0 读 DDR
+## H. 双窗数据流
 
-- PS7 `M_AXI_HP0` → PL `axi_frame_writer`  
-- AXI3，`ARLEN` 4 bit，**最多 16 beat**  
-- 源宽 32 bit，每 beat 2 个 RGB565 像素  
-- 一帧 512×300×2 = 307200 B  
-
-**考点**：ARID 在 HP 口是 6 bit；burst 长度用 `arlen=15`（16 beat）。
+效果只对 **左半屏** `de && left` 跑一遍，写入 `line_cache`。  
+右半屏从同一 `line_cache` 按 cx 读出，保证左右同源可对比。  
+中间蓝线 x=511,512。
 
 ---
 
-## F. PS 网络栈
+## I. Cache 一致性
 
-- BSP：`lwip220` RAW 模式，静态 IP  
-- 本板 RTL8211：`CONFIG_LINKSPEED1000`（写死 1000M），自协商失败时强制 1000  
-- PHY 地址 1；`BMSR` bit2 = link up  
-- 收包回调拷贝到 DDR，满帧 `Xil_DCacheFlushRange` 再给 PL 读  
-
-**考点**：cache 不 flush，PL 会读到旧数据；flush 后还要保证地址非 cacheable 或一致性策略正确（当前 flush 策略已实测可用）。
+PS 写 DDR 走 cache；PL HP0 读物理 DDR。  
+必须在整帧写完后 `Xil_DCacheFlushRange`，否则 PL 读到旧数据或半帧。
 
 ---
 
-## G. AXI GPIO 控制（不要用 EMIO）
+## J. 串口与第三方助手
 
-本板 **EMIO bank2 读回恒 0**，不可用。控制走 GP0：
-
-- 基址 **0x41200000**（以 XSA / `xparameters.h` 为准）  
-- 寄存器：0x00 DATA，0x04 TRI（写 0 全输出）
+固件在 `\r`/`\n` 处解析。助手需 **CR+LF**、无流控、115200 8N1。  
+Vitis 终端默认带换行，故好使。
 
 ---
 
-## H. 上位机
+## K. FFmpeg
 
-- 协议：UDP，每包 ≤1400 B，一帧 220 包量级  
-- 多网卡时 **bind 源 IP 192.168.1.100**，否则可能走 WLAN  
-- FFmpeg：需带 **H.264 decoder** 的完整版（scoop `ffmpeg` 可用；精简版不行）
-
----
-
-## I. 串口助手「能收不能发」
-
-板端用 `XUartPs_RecvByte` 轮询，**收到 `\r` 或 `\n` 才解析**。
-
-第三方助手请设：
-
-| 项 | 值 |
-|----|-----|
-| 波特率 | 115200 8N1 |
-| 流控 | 无 |
-| 发送行尾 | **CR+LF**（`\\r\\n`） |
-| 勾选「发送新行」 | 是 |
-
-Vitis 自带终端默认会加换行，所以好使。部分助手默认 LF-only 或「无行尾」，命令会一直堆在 `buf` 里不执行。
+必须用带 **H.264 decoder** 的完整版。精简 Ghost 版只有 mjpeg/vp8/vp9，解不了 mp4。  
+缩放建议 `lanczos`；2376×1080→512×300 本身就会糊，属分辨率限制。
 
 ---
 
-## J. 仿真与金标
+## L. 下载流程
 
-- `sim/run_sim.tcl`：四套单元 TB  
-- `scripts/golden_model.py`：与 RTL 同序的 Python 金标图 → `sim_out/`  
-- 对比：`rot_*.png`、`proc_*.png`、`dual_preview.png`
+Vitis **Run** = FSBL + ps7_init + bit + ELF。  
+仅 xsdb `dow` 而不跑 `ps7_init`，UART 可能无输出。
+
+脚本下载须含：
+
+```
+loadhw -hw system.xsa
+source ps7_init.tcl
+ps7_init / ps7_post_config
+rst -processor / dow / con
+```

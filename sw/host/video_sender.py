@@ -13,6 +13,7 @@ import argparse
 import math
 import os
 import socket
+import struct
 import subprocess
 import time
 
@@ -163,8 +164,8 @@ def ffmpeg_frame_iter(path: str, loop: bool = True):
             ff, "-hide_banner", "-loglevel", "error", "-nostdin",
             "-i", path,
             "-an",
-            "-vf", f"scale={W}:{H}:flags=bilinear",
-            "-f", "mjpeg", "-q:v", "3",
+            "-vf", f"scale={W}:{H}:flags=lanczos",
+            "-f", "mjpeg", "-q:v", "2",
             "-",
         ]
         print(f"[TX] ffmpeg mjpeg pipe: {path}")
@@ -284,9 +285,13 @@ def main():
     try:
         for frame in frame_iter(args):
             payload = rgb888_to_rgb565(frame)
-            mtu = 1400
+            # each UDP datagram: [u32 LE offset][rgb565 bytes]
+            # board writes payload at FRAME_ADDR+offset (handles reorder/loss)
+            hdr = 4
+            mtu = 1400 - hdr
             for off in range(0, len(payload), mtu):
-                sock.sendto(payload[off : off + mtu], (args.ip, args.port))
+                chunk = payload[off : off + mtu]
+                sock.sendto(struct.pack("<I", off) + chunk, (args.ip, args.port))
             n += 1
             if n == 1:
                 print(f"[TX] first frame {len(payload)} bytes ({(len(payload)+mtu-1)//mtu} pkts)")

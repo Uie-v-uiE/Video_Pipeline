@@ -114,11 +114,22 @@ static void on_udp_frame(void *arg, struct udp_pcb *pcb, struct pbuf *p,
     udp_pkts++;
     q = p;
     while (q) {
+        u8 *pl = (u8 *)q->payload;
         u32 len = q->len;
-        if (rx_bytes + len > FRAME_BYTES)
-            len = FRAME_BYTES - rx_bytes;
-        if (len) {
-            memcpy((void *)(UINTPTR)(FRAME_ADDR + rx_bytes), q->payload, len);
+        u32 off;
+        /* packet: [u32 LE offset][data] — write at absolute offset in frame */
+        if (len < 4) {
+            q = q->next;
+            continue;
+        }
+        off = (u32)pl[0] | ((u32)pl[1] << 8) | ((u32)pl[2] << 16) | ((u32)pl[3] << 24);
+        pl += 4;
+        len -= 4;
+        if (off < FRAME_BYTES) {
+            if (off + len > FRAME_BYTES)
+                len = FRAME_BYTES - off;
+            if (len)
+                memcpy((void *)(UINTPTR)(FRAME_ADDR + off), pl, len);
             rx_bytes += len;
         }
         q = q->next;
@@ -171,15 +182,27 @@ static void uart_poll(void)
                     if (th > 255) th = 255;
                     ctrl_set_thr((u8)th);
                 } else if (!strncmp(buf, "FILL", 4)) {
+                    /* 2x2 diagnostic: green top bar; red/yellow top; blue/white bottom */
                     volatile u16 *p = (volatile u16 *)FRAME_ADDR;
                     int i;
                     for (i = 0; i < FRAME_W * FRAME_H; i++) {
                         int x = i % FRAME_W, y = i / FRAME_W;
-                        p[i] = (u16)(((x >> 3) << 11) | ((y >> 2) << 5) | ((x + y) >> 3));
+                        u16 c;
+                        if (y < 8)
+                            c = 0x07E0;
+                        else if (x < 256 && y < 150)
+                            c = 0xF800;
+                        else if (x >= 256 && y < 150)
+                            c = 0xFFE0;
+                        else if (x < 256)
+                            c = 0x001F;
+                        else
+                            c = 0xFFFF;
+                        p[i] = c;
                     }
                     Xil_DCacheFlushRange(FRAME_ADDR, FRAME_BYTES);
                     ctrl_set_src(1);
-                    xil_printf("[CMD] DDR filled\r\n");
+                    xil_printf("[CMD] FILL 2x2 diagnostic\r\n");
                 } else if (!strncmp(buf, "STAT", 4)) {
                     print_net_status();
                 } else {
