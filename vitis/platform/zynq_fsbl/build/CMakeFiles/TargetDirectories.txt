@@ -1,0 +1,4 @@
+D:/Software/Xiaomi_MiMo/video/zynq_video_pipeline/vitis/platform/zynq_fsbl/build/CMakeFiles/fsbl.elf.dir
+D:/Software/Xiaomi_MiMo/video/zynq_video_pipeline/vitis/platform/zynq_fsbl/build/CMakeFiles/print_build_info.dir
+D:/Software/Xiaomi_MiMo/video/zynq_video_pipeline/vitis/platform/zynq_fsbl/build/CMakeFiles/edit_cache.dir
+D:/Software/Xiaomi_MiMo/video/zynq_video_pipeline/vitis/platform/zynq_fsbl/build/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,65 @@
+# Build artifacts
+*.jou
+*.log
+*.str
+*.pb
+*.wdb
+*.wcfg
+.Xil/
+*.cache/
+*.runs/
+*.hw/
+*.ip_user_files/
+*.gen/
+*.sim/
+*.srcs/sources_1/bd/*/ipshared/
+vivado_proj/
+*.mss
+*.xsa.bak
+
+# Bitstreams / large binaries (keep output/*.bit if needed for demo — uncomment to ignore)
+# output/*.bit
+# output/*.bin
+output/*.ltx
+output/*.dcp
+
+# Vitis / app build trees
+vitis_udp/**/build/
+vitis_udp/**/_ide/.wsdata/
+vitis_udp/**/.rigel_lopper*/
+vitis_udp/platform/export/
+vitis_udp/platform/**/build/
+vitis_udp/**/Debug/
+vitis_udp/**/Release/
+vitis_udp/**/*.elf
+vitis_udp/**/*.o
+vitis_udp/**/*.d
+vitis_udp/**/CMakeCache.txt
+vitis_udp/**/CMakeFiles/
+vitis_udp/**/cmake_install.cmake
+
+# Keep sources
+!sw/ps/**
+!sw/host/**
+!rtl/**
+!constraints/**
+!tcl/**
+!sim/**
+!docs/**
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS / IDE
+Thumbs.db
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Host test media (large)
+sw/host/test.mjpeg
+tools/*.zip
+tools/ffmpeg*/

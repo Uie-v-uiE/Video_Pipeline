@@ -1,0 +1,1 @@
+-debug "typical" "tb_uart_decode_bits" -s "tb_uart_decode_bits_snap" 

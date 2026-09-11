@@ -1,0 +1,1 @@
+-debug "typical" "tb_timing" -s "tb_timing_snap" 

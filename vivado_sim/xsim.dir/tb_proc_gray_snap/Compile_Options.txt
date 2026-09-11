@@ -1,0 +1,1 @@
+-debug "typical" "tb_proc_gray" -s "tb_proc_gray_snap" 
