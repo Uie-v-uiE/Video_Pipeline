@@ -23,7 +23,7 @@ zynq_video_pipeline/
 ├── .gitignore
 ├── rtl/                      PL 源码
 │   ├── top/                  system_top, pl_video_top, pl_demo_top
-│   ├── video/                时序、彩条、分屏、frame_buffer
+│   ├── video/                时序、彩条、分屏、frame_buffer(_db)、osd_overlay
 │   ├── process/              五效果流水线 + rotate/
 │   ├── axi/                  axi_frame_writer（HP0 读 DDR）
 │   ├── hdmi/                 TMDS 编码串化
@@ -38,6 +38,14 @@ zynq_video_pipeline/
 │   └── host/                 上位机 UDP / 一键脚本
 ├── skill/                    竞赛技能包
 ├── docs/                     全部设计文档
+├── output/                   bit / xsa / 时序报告
+└── sim_out/                  金标图输出
+```
+
+**新增文件：**
+- `rtl/video/frame_buffer_db.v` — 双缓冲防撕裂
+- `rtl/video/osd_overlay.v` — 屏上显示角度/效果/FPS
+- `docs/TIMING_REPORT.md` — 时序优化记录 v1→v4
 └── output/                   bit / xsa / 报告输出
 ```
 
