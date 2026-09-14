@@ -22,11 +22,13 @@ module tb_rotate_mapper;
         input [11:0] x, y;
         begin
             angle = 0; x_in = x; y_in = y;
-            @(posedge clk); @(posedge clk);
+            // rotate_mapper is 3-stage pipeline; sample after 5 clocks
+            repeat (5) @(posedge clk);
             if (oob || x_out !== x || y_out !== y) begin
                 $display("FAIL id (%0d,%0d)->(%0d,%0d) oob=%b", x, y, x_out, y_out, oob);
                 errors = errors + 1;
-            end
+            end else
+                $display("PASS id (%0d,%0d)", x, y);
         end
     endtask
 

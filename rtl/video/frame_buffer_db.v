@@ -32,8 +32,10 @@ module frame_buffer_db #(
             else
                 buf0[wr_addr] <= wr_data;
         end
-        if (wr_frame_done)
-            wr_swap_tog <= ~wr_swap_tog;
+        if (wr_frame_done) begin
+            wr_sel      <= ~wr_sel;       // next frame goes to the other bank
+            wr_swap_tog <= ~wr_swap_tog;  // tell display to flip at next vsync
+        end
     end
 
     reg s0, s1, s2;

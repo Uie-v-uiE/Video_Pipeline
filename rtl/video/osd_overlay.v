@@ -1,11 +1,18 @@
 `timescale 1ns/1ps
-// OSD overlay: shows ANG=hex, EN=binary, FPS=hex at top-left.
+// OSD only:
+//   L0 FPS=xx      (decimal 2)
+//   L1 ANG=xxx     (decimal 3)
+//   L2 EN=xxxxx    (binary 5)
+// 3x rose. Space = blank glyph (NOT digit 0).
 module osd_overlay #(
-    parameter X0 = 8,
-    parameter Y0 = 8,
-    parameter CHAR_W = 6,
-    parameter CHAR_H = 8,
-    parameter MAX_CHARS = 20
+    parameter X0 = 16,
+    parameter Y0 = 12,
+    parameter SCALE = 3,
+    parameter CHAR_W = 18,          // 5*3 + 3 gap
+    parameter CHAR_H = 21,          // 7*3
+    parameter LINE_GAP = 10,
+    parameter MAX_CHARS = 10,
+    parameter N_LINES = 3
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -15,59 +22,107 @@ module osd_overlay #(
     input  wire [8:0]  angle,
     input  wire [4:0]  effect_en,
     input  wire [7:0]  fps,
+    input  wire        src_sel,
+    input  wire        eth_link,
+    input  wire [15:0] net_pkts,
+    input  wire [15:0] net_bad,
     input  wire [15:0] bg_pix,
-    output reg  [15:0] out_pix
+    output reg  [7:0]  r,
+    output reg  [7:0]  g,
+    output reg  [7:0]  b,
+    output reg         de_out,
+    input  wire        hs_in,
+    input  wire        vs_in,
+    output reg         hs_out,
+    output reg         vs_out,
+    input  wire [7:0]  r_in,
+    input  wire [7:0]  g_in,
+    input  wire [7:0]  b_in
 );
-    wire [11:0] local_x = x - X0;
-    wire [11:0] local_y = y - Y0;
-    wire in_osd = de && (x >= X0) && (x < X0 + MAX_CHARS*CHAR_W) &&
-                  (y >= Y0) && (y < Y0 + CHAR_H);
+    localparam LINE_H = CHAR_H + LINE_GAP;
+    localparam BOX_W  = MAX_CHARS * CHAR_W;
+    localparam BOX_H  = N_LINES * LINE_H;
 
-    wire [4:0] char_idx = local_x / CHAR_W;
-    wire [2:0] pix_x    = local_x % CHAR_W;
-    wire [2:0] pix_y    = local_y;
+    wire in_box = de && (x >= X0) && (x < X0 + BOX_W) &&
+                  (y >= Y0) && (y < Y0 + BOX_H);
+    wire [11:0] lx = x - X0;
+    wire [11:0] ly = y - Y0;
+    wire [1:0]  line = (ly / LINE_H);
+    wire [7:0]  pix_y = ly - line * LINE_H;
+    wire [4:0]  cidx = lx / CHAR_W;
+    wire [7:0]  pix_x = lx % CHAR_W;
+    wire        in_char = in_box && (pix_y < CHAR_H);
 
-    function [7:0] hex_char;
+    function [7:0] dig;
         input [3:0] v;
         begin
-            if (v < 10) hex_char = "0" + v;
-            else hex_char = "A" + (v - 10);
+            if (v <= 4'd9) dig = 8'h30 + v;  // '0'..'9'
+            else           dig = 8'h20;      // blank
         end
     endfunction
 
-    reg [7:0] chars [0:MAX_CHARS-1];
+    wire [7:0]  fps_v = (fps > 8'd99) ? 8'd99 : fps;
+    wire [7:0]  fps_t = (fps_v / 8'd10) % 8'd10;
+    wire [7:0]  fps_o = fps_v % 8'd10;
+
+    wire [8:0]  ang_v = angle;                 // 0..359
+    wire [15:0] ang16 = {7'd0, ang_v};
+    wire [3:0]  ang_h = (ang16 / 16'd100) % 16'd10;
+    wire [3:0]  ang_t = (ang16 / 16'd10)  % 16'd10;
+    wire [3:0]  ang_o = ang16 % 16'd10;
+
+    // Fixed strings — no trailing junk
+    reg [7:0] chars [0:N_LINES*MAX_CHARS-1];
     integer i;
     always @(*) begin
-        for (i = 0; i < MAX_CHARS; i = i + 1)
+        for (i = 0; i < N_LINES*MAX_CHARS; i = i + 1)
             chars[i] = 8'h20;
-        chars[0] = "A";
-        chars[1] = hex_char(angle[11:8] & 4'hF);
-        chars[2] = hex_char(angle[7:4]);
-        chars[3] = hex_char(angle[3:0]);
-        chars[4] = 8'h20;
-        chars[5] = "E";
-        chars[6] = effect_en[0] ? "1" : "0";
-        chars[7] = effect_en[1] ? "1" : "0";
-        chars[8] = effect_en[2] ? "1" : "0";
-        chars[9] = effect_en[3] ? "1" : "0";
-        chars[10] = effect_en[4] ? "1" : "0";
-        chars[11] = 8'h20;
-        chars[12] = "F";
-        chars[13] = hex_char(fps[7:4]);
-        chars[14] = hex_char(fps[3:0]);
+
+        // L0: FPS=xx
+        chars[0] = "F";
+        chars[1] = "P";
+        chars[2] = "S";
+        chars[3] = "=";
+        chars[4] = dig(fps_t[3:0]);
+        chars[5] = dig(fps_o[3:0]);
+
+        // L1: ANG=xxx
+        chars[1*MAX_CHARS+0] = "A";
+        chars[1*MAX_CHARS+1] = "N";
+        chars[1*MAX_CHARS+2] = "G";
+        chars[1*MAX_CHARS+3] = "=";
+        chars[1*MAX_CHARS+4] = dig(ang_h);
+        chars[1*MAX_CHARS+5] = dig(ang_t);
+        chars[1*MAX_CHARS+6] = dig(ang_o);
+
+        // L2: EN=xxxxx
+        chars[2*MAX_CHARS+0] = "E";
+        chars[2*MAX_CHARS+1] = "N";
+        chars[2*MAX_CHARS+2] = "=";
+        chars[2*MAX_CHARS+3] = effect_en[0] ? "1" : "0";
+        chars[2*MAX_CHARS+4] = effect_en[1] ? "1" : "0";
+        chars[2*MAX_CHARS+5] = effect_en[2] ? "1" : "0";
+        chars[2*MAX_CHARS+6] = effect_en[3] ? "1" : "0";
+        chars[2*MAX_CHARS+7] = effect_en[4] ? "1" : "0";
     end
 
-    // 5x7 font for 0-9 A-F
-    reg [4:0] font [0:15][0:6];
+    // 5x7 font. Index 31 = blank (spaces).
+    reg [4:0] font [0:31][0:6];
+    integer fi, fj;
     initial begin
+        for (fi = 0; fi < 32; fi = fi + 1)
+            for (fj = 0; fj < 7; fj = fj + 1)
+                font[fi][fj] = 5'b00000;
+
+        // 0-9
         font[0][0]=5'b01110; font[0][1]=5'b10001; font[0][2]=5'b10011;
         font[0][3]=5'b10101; font[0][4]=5'b11001; font[0][5]=5'b10001; font[0][6]=5'b01110;
         font[1][0]=5'b00100; font[1][1]=5'b01100; font[1][2]=5'b00100;
         font[1][3]=5'b00100; font[1][4]=5'b00100; font[1][5]=5'b00100; font[1][6]=5'b01110;
         font[2][0]=5'b01110; font[2][1]=5'b10001; font[2][2]=5'b00001;
         font[2][3]=5'b00110; font[2][4]=5'b01000; font[2][5]=5'b10000; font[2][6]=5'b11111;
-        font[3][0]=5'b11111; font[3][1]=5'b00010; font[3][2]=5'b00100;
-        font[3][3]=5'b00010; font[3][4]=5'b00001; font[3][5]=5'b10001; font[3][6]=5'b01110;
+        font[3][0]=5'b11111; font[3][1]=5'b00010; font[3][2]=5'b01000;
+        font[3][3]=5'b00001; font[3][4]=5'b00001; font[3][5]=5'b10001; font[3][6]=5'b01110;
         font[4][0]=5'b00010; font[4][1]=5'b00110; font[4][2]=5'b01010;
         font[4][3]=5'b10010; font[4][4]=5'b11111; font[4][5]=5'b00010; font[4][6]=5'b00010;
         font[5][0]=5'b11111; font[5][1]=5'b10000; font[5][2]=5'b11110;
@@ -75,11 +130,12 @@ module osd_overlay #(
         font[6][0]=5'b00110; font[6][1]=5'b01000; font[6][2]=5'b10000;
         font[6][3]=5'b11110; font[6][4]=5'b10001; font[6][5]=5'b10001; font[6][6]=5'b01110;
         font[7][0]=5'b11111; font[7][1]=5'b00001; font[7][2]=5'b00010;
-        font[7][3]=5'b00100; font[7][4]=5'b01000; font[7][5]=5'b01000; font[7][6]=5'b01000;
+        font[7][3]=5'b01000; font[7][4]=5'b01000; font[7][5]=5'b01000; font[7][6]=5'b01000;
         font[8][0]=5'b01110; font[8][1]=5'b10001; font[8][2]=5'b10001;
         font[8][3]=5'b01110; font[8][4]=5'b10001; font[8][5]=5'b10001; font[8][6]=5'b01110;
         font[9][0]=5'b01110; font[9][1]=5'b10001; font[9][2]=5'b10001;
         font[9][3]=5'b01111; font[9][4]=5'b00001; font[9][5]=5'b00010; font[9][6]=5'b01100;
+        // A=10 B=11 C=12 D=13 E=14 F=15
         font[10][0]=5'b01110; font[10][1]=5'b10001; font[10][2]=5'b10001;
         font[10][3]=5'b11111; font[10][4]=5'b10001; font[10][5]=5'b10001; font[10][6]=5'b10001;
         font[11][0]=5'b11110; font[11][1]=5'b10001; font[11][2]=5'b10001;
@@ -92,29 +148,54 @@ module osd_overlay #(
         font[14][3]=5'b11110; font[14][4]=5'b10000; font[14][5]=5'b10000; font[14][6]=5'b11111;
         font[15][0]=5'b11111; font[15][1]=5'b10000; font[15][2]=5'b10000;
         font[15][3]=5'b11110; font[15][4]=5'b10000; font[15][5]=5'b10000; font[15][6]=5'b10000;
+        // G=16 N=20 P=22 S=24 = = 27
+        font[16][0]=5'b01110; font[16][1]=5'b10001; font[16][2]=5'b10000;
+        font[16][3]=5'b10111; font[16][4]=5'b10001; font[16][5]=5'b10001; font[16][6]=5'b01110;
+        font[20][0]=5'b10001; font[20][1]=5'b11001; font[20][2]=5'b10101;
+        font[20][3]=5'b10101; font[20][4]=5'b10011; font[20][5]=5'b10001; font[20][6]=5'b10001;
+        font[22][0]=5'b11110; font[22][1]=5'b10001; font[22][2]=5'b10001;
+        font[22][3]=5'b11110; font[22][4]=5'b10000; font[22][5]=5'b10000; font[22][6]=5'b10000;
+        font[24][0]=5'b01111; font[24][1]=5'b10000; font[24][2]=5'b10000;
+        font[24][3]=5'b01110; font[24][4]=5'b00001; font[24][5]=5'b00001; font[24][6]=5'b11110;
+        font[27][0]=5'b00000; font[27][1]=5'b00000; font[27][2]=5'b11111;
+        font[27][3]=5'b00000; font[27][4]=5'b11111; font[27][5]=5'b00000; font[27][6]=5'b00000;
+        // 31 stays blank
     end
 
-    function [3:0] ascii_to_idx;
+    function [4:0] glyph_idx;
         input [7:0] c;
         begin
-            if (c >= "0" && c <= "9") ascii_to_idx = c - "0";
-            else if (c >= "A" && c <= "F") ascii_to_idx = 4'd10 + (c - "A");
-            else ascii_to_idx = 4'd15;
+            if (c >= 8'h30 && c <= 8'h39)      glyph_idx = c - 8'h30;          // 0-9
+            else if (c >= 8'h41 && c <= 8'h46) glyph_idx = 5'd10 + (c - 8'h41); // A-F
+            else if (c == 8'h47) glyph_idx = 5'd16; // G
+            else if (c == 8'h4E) glyph_idx = 5'd20; // N
+            else if (c == 8'h50) glyph_idx = 5'd22; // P
+            else if (c == 8'h53) glyph_idx = 5'd24; // S
+            else if (c == 8'h3D) glyph_idx = 5'd27; // =
+            else                 glyph_idx = 5'd31; // BLANK (space etc.)
         end
     endfunction
 
-    wire is_hex = (chars[char_idx] >= "0" && chars[char_idx] <= "9") ||
-                  (chars[char_idx] >= "A" && chars[char_idx] <= "F");
-    wire [3:0] fidx = ascii_to_idx(chars[char_idx]);
-    wire [4:0] font_row = font[fidx][pix_y];
-    wire pixel_on = in_osd && is_hex && pix_x < 5 && (font_row[4 - pix_x] == 1'b1);
+    wire [7:0] ch = chars[line*MAX_CHARS + cidx];
+    wire [4:0] gi = glyph_idx(ch);
+    wire [2:0] fx = pix_x / SCALE;
+    wire [2:0] fy = (pix_y < 7*SCALE) ? (pix_y / SCALE) : 3'd6;
+    wire [4:0] font_row = font[gi][fy];
+    wire pixel_on = in_char && (fx < 5) && (font_row[4-fx] == 1'b1);
 
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n)
-            out_pix <= 16'h0000;
-        else if (pixel_on)
-            out_pix <= 16'hFFFF;
-        else
-            out_pix <= bg_pix;
+        if (!rst_n) begin
+            r <= 0; g <= 0; b <= 0;
+            de_out <= 0; hs_out <= 0; vs_out <= 0;
+        end else begin
+            de_out <= de;
+            hs_out <= hs_in;
+            vs_out <= vs_in;
+            if (pixel_on) begin
+                r <= 8'hFF; g <= 8'h00; b <= 8'h90; // rose
+            end else begin
+                r <= r_in; g <= g_in; b <= b_in;
+            end
+        end
     end
 endmodule

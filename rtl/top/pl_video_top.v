@@ -40,12 +40,23 @@ module pl_video_top #(
     input  wire        m_axi_rvalid,
     output wire        m_axi_rready,
 
+    // PL UDP eth write stream (clk_125 domain from eth_udp_video_top)
+    input  wire        eth_wr_clk,
+    input  wire        eth_wr_en,
+    input  wire [18:0] eth_wr_addr,
+    input  wire [15:0] eth_wr_data,
+    input  wire        eth_link,
+    input  wire        eth_frame,   // pulse: full frame reassembled
+    input  wire [15:0] eth_pkts,
+    input  wire [15:0] eth_bad,
+
     output wire [31:0] status
 );
     wire clk_pix, clk_pix5x, locked;
+    wire clk_200m_unused;
     clk_gen u_clk (
         .clk_in(sys_clk), .rst_n(sys_rst_n),
-        .clk_pix(clk_pix), .clk_pix5x(clk_pix5x), .locked(locked)
+        .clk_pix(clk_pix), .clk_pix5x(clk_pix5x), .clk_200m(clk_200m_unused), .locked(locked)
     );
     wire rst_pix_n = sys_rst_n & locked;
 
@@ -120,6 +131,23 @@ module pl_video_top #(
     wire [11:0] sy = rot_on ? sy_map : cy_q3;
     wire        oob = rot_on ? oob_map : oob_q3;
 
+    // Auto-switch only after at least one complete ETH frame
+    // eth_frame is in eth_clk domain — toggle + 2FF sync
+    reg eth_frame_tog = 1'b0;
+    always @(posedge eth_wr_clk) if (eth_frame) eth_frame_tog <= ~eth_frame_tog;
+    reg ef0, ef1, ef2;
+    always @(posedge axi_clk or negedge axi_rst_n) begin
+        if (!axi_rst_n) {ef2,ef1,ef0} <= 3'b0;
+        else {ef2,ef1,ef0} <= {ef1,ef0,eth_frame_tog};
+    end
+    wire eth_frame_axi = ef1 ^ ef2;
+    reg eth_has_frame = 1'b0;
+    always @(posedge axi_clk or negedge axi_rst_n) begin
+        if (!axi_rst_n) eth_has_frame <= 1'b0;
+        else if (eth_frame_axi) eth_has_frame <= 1'b1;
+    end
+    wire src_use = src_sel | (eth_link & eth_has_frame);
+
     // ---- colorbar on the fly (no BRAM, no FCLK) ----
     wire [15:0] bar_at_cxcy;
     color_bar #(.H_ACTIVE(IMG_W), .V_ACTIVE(IMG_H)) u_bar (
@@ -131,7 +159,7 @@ module pl_video_top #(
     reg fs_tog;
     always @(posedge clk_pix or negedge rst_pix_n) begin
         if (!rst_pix_n) fs_tog <= 1'b0;
-        else if (frame_start && src_sel) fs_tog <= ~fs_tog;
+        else if (frame_start && src_use && !eth_link) fs_tog <= ~fs_tog;
     end
     reg fs0, fs1, fs2;
     always @(posedge axi_clk or negedge axi_rst_n) begin
@@ -143,13 +171,14 @@ module pl_video_top #(
     wire        aw_wr_en;
     wire [18:0] aw_wr_addr;
     wire [15:0] aw_wr_data;
+    wire        aw_frame_done;
     assign m_axi_arid = 6'd0;
 
     axi_frame_writer #(.IMG_W(IMG_W), .IMG_H(IMG_H), .BASE_ADDR(BASE_ADDR)) u_aw (
         .clk(axi_clk), .rst_n(axi_rst_n),
-        .enable(src_sel),
+        .enable(src_use && !eth_link),
         .frame_start(axi_frame_start),
-        .frame_busy(), .frame_done(),
+        .frame_busy(), .frame_done(aw_frame_done),
         .fb_wr_en(aw_wr_en), .fb_wr_addr(aw_wr_addr), .fb_wr_data(aw_wr_data),
         .m_axi_araddr(m_axi_araddr), .m_axi_arlen(m_axi_arlen),
         .m_axi_arsize(m_axi_arsize), .m_axi_arburst(m_axi_arburst),
@@ -160,8 +189,49 @@ module pl_video_top #(
 
     wire [15:0] fb_rd;
     wire [18:0] rd_addr = sy * IMG_W + sx;
+
+    // CDC eth write stream (eth_wr_clk) -> axi_clk
+    wire [35:0] eth_fifo_dout;
+    wire eth_fifo_empty, eth_fifo_full;
+    reg  eth_fifo_rd = 0;
+    reg  eth_wr_axi = 0;
+    reg [18:0] eth_a_axi;
+    reg [15:0] eth_d_axi;
+    reg eth_rd_d = 0;
+
+    // Pack: {addr[18:0], data[15:0]} = 35 bits into 36-bit word
+    // bit[34:16]=addr, bit[15:0]=data, bit[35]=0
+    dc_fifo #(.DATA_W(36), .ADDR_W(6)) u_eth_cdc (
+        .wr_clk(eth_wr_clk), .wr_rst_n(sys_rst_n),
+        .wr_en(eth_wr_en && !eth_fifo_full),
+        .wr_data({1'b0, eth_wr_addr, eth_wr_data}),
+        .wr_full(eth_fifo_full),
+        .rd_clk(axi_clk), .rd_rst_n(axi_rst_n),
+        .rd_en(eth_fifo_rd), .rd_data(eth_fifo_dout), .rd_empty(eth_fifo_empty)
+    );
+
+    always @(posedge axi_clk or negedge axi_rst_n) begin
+        if (!axi_rst_n) begin
+            eth_fifo_rd <= 0; eth_rd_d <= 0; eth_wr_axi <= 0;
+            eth_a_axi <= 0; eth_d_axi <= 0;
+        end else begin
+            eth_fifo_rd <= !eth_fifo_empty && !eth_fifo_rd && !eth_rd_d;
+            eth_rd_d    <= eth_fifo_rd;
+            eth_wr_axi  <= eth_rd_d;
+            if (eth_rd_d) begin
+                eth_a_axi <= eth_fifo_dout[34:16];  // NOT [35:17]
+                eth_d_axi <= eth_fifo_dout[15:0];
+            end
+        end
+    end
+
+    // ETH writes BRAM live (proven display path). AXI path for PS FILL/DDR.
+    wire        fb_wr_en   = eth_link ? eth_wr_axi  : aw_wr_en;
+    wire [18:0] fb_wr_addr = eth_link ? eth_a_axi   : aw_wr_addr;
+    wire [15:0] fb_wr_data = eth_link ? eth_d_axi   : aw_wr_data;
+
     frame_buffer #(.W(IMG_W), .H(IMG_H)) u_fb (
-        .wr_clk(axi_clk), .wr_en(aw_wr_en), .wr_addr(aw_wr_addr), .wr_data(aw_wr_data),
+        .wr_clk(axi_clk), .wr_en(fb_wr_en), .wr_addr(fb_wr_addr), .wr_data(fb_wr_data),
         .rd_clk(clk_pix), .rd_addr(rd_addr), .rd_data(fb_rd)
     );
 
@@ -178,7 +248,7 @@ module pl_video_top #(
     reg oob_d1;
     always @(posedge clk_pix) oob_d1 <= oob;
     wire [15:0] ddr_pix = oob_d1 ? 16'h0000 : fb_rd;
-    wire [15:0] src_pix = src_sel ? ddr_pix : bar_d3;
+    wire [15:0] src_pix = src_use ? ddr_pix : bar_d3;
 
     // delay sideband by 4 (map3 + BRAM1)
     reg        de_d[0:3], hs_d[0:3], vs_d[0:3], left_d[0:3];
@@ -260,10 +330,61 @@ module pl_video_top #(
         .de_out(de_o), .hs_out(hs_o), .vs_out(vs_o)
     );
 
+    // FPS from vs edges (vs_d4 is pre-split; use pipeline vs)
+    reg vs_pix_d0, vs_pix_d1;
+    always @(posedge clk_pix) begin
+        vs_pix_d0 <= vs_d4;
+        vs_pix_d1 <= vs_pix_d0;
+    end
+    wire vs_tick = vs_pix_d0 & ~vs_pix_d1;
+
+    reg [31:0] fps_acc;
+    reg [25:0] sec_div;
+    reg [7:0]  fps_q;
+    reg vt0, vt1, vt2;
+    always @(posedge sys_clk) {vt2, vt1, vt0} <= {vt1, vt0, vs_tick};
+    wire vs_sys = vt1 & ~vt2;
+
+    always @(posedge sys_clk or negedge rst_pix_n) begin
+        if (!rst_pix_n) begin
+            sec_div <= 0; fps_acc <= 0; fps_q <= 0;
+        end else if (sec_div == 26'd49_999_999) begin
+            sec_div <= 0;
+            fps_q   <= fps_acc[7:0];
+            fps_acc <= 0;
+        end else begin
+            sec_div <= sec_div + 1'b1;
+            if (vs_sys) fps_acc <= fps_acc + 1'b1;
+        end
+    end
+
+    reg [15:0] pkts_s0, pkts_s1, bad_s0, bad_s1;
+    reg        link_s0, link_s1;
+    always @(posedge clk_pix) begin
+        {pkts_s1, pkts_s0} <= {pkts_s0, eth_pkts};
+        {bad_s1, bad_s0}   <= {bad_s0, eth_bad};
+        {link_s1, link_s0} <= {link_s0, eth_link};
+    end
+
+    wire [7:0] r_osd, g_osd, b_osd;
+    wire de_osd, hs_osd, vs_osd;
+    osd_overlay u_osd (
+        .clk(clk_pix), .rst_n(rst_pix_n),
+        .x(x_d4), .y(y_d4), .de(de_o),
+        .angle(angle), .effect_en(en_sync), .fps(fps_q),
+        .src_sel(src_use), .eth_link(link_s1),
+        .net_pkts(pkts_s1), .net_bad(bad_s1),
+        .bg_pix(16'h0),
+        .r_in(r), .g_in(g), .b_in(b),
+        .hs_in(hs_o), .vs_in(vs_o),
+        .r(r_osd), .g(g_osd), .b(b_osd),
+        .de_out(de_osd), .hs_out(hs_osd), .vs_out(vs_osd)
+    );
+
     rgb2dvi u_dvi (
         .clk_pix(clk_pix), .clk_pix5x(clk_pix5x), .rst_n(rst_pix_n),
-        .r(r), .g(g), .b(b),
-        .hs(hs_o), .vs(vs_o), .de(de_o),
+        .r(r_osd), .g(g_osd), .b(b_osd),
+        .hs(hs_osd), .vs(vs_osd), .de(de_osd),
         .tmds_clk_p(tmds_clk_p), .tmds_clk_n(tmds_clk_n),
         .tmds_data_p(tmds_data_p), .tmds_data_n(tmds_data_n)
     );
@@ -274,6 +395,6 @@ module pl_video_top #(
         else hb <= hb + 25'd1;
     end
     assign led[0] = hb[24];
-    assign led[1] = |en_sync;
-    assign status = {5'd0, locked, rotate_active, angle, en_sync, src_sel, 10'd0};
+    assign led[1] = eth_link | (|en_sync);
+    assign status = {3'd0, eth_link, locked, rotate_active, angle, en_sync, src_sel, 10'd0};
 endmodule

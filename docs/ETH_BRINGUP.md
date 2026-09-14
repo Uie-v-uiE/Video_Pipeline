@@ -1,64 +1,41 @@
 # 以太网 UDP 送视频
 
-## 网络
+## 网络（PL 卸载后）
 
 | 端 | 设置 |
 |----|------|
-| 板卡 PS eth0 | **192.168.1.10/24**（程序写死） |
-| PC 网卡 | 192.168.1.100/24（同一网段） |
+| **板卡 PL 网口（PHY2）** | 硬件收 UDP 5001，无需 PS IP |
+| PC 网卡 | 192.168.1.100/24 |
 | 协议 | UDP 端口 **5001** |
 | 载荷 | RGB565 小端，**512×300**，一帧 307200 字节 |
-| 分片 | 上位机 1400 字节/包 |
+| 包格式 | `[u32 LE offset][payload]`，payload ≤1396 B |
+| **网线** | 插 **PL ETH**（不是 PS 口） |
 
-## Vitis
-
-1. **新 Platform** ← 最新 `output\system.xsa`（已含 ENET0 + axi_gpio）  
-2. BSP 勾选：**lwip**、**xuartps**（不必 xgpio）  
-3. lwip 建议：  
-   - `lwip_api_mode` = **RAW**  
-   - `lwip_dhcp` = false（用静态 IP）  
-   - `lwip_n_tx_desc` / `n_rx_desc` 可默认  
-4. 源文件：当前 `sw/ps/main.c`  
-5. Build → Launch  
-
-串口应看到：
-
-```
-[NET] ip=192.168.1.10 udp=5001 frame=512x300
-```
+> PS 网口可闲置，或仅作调试。应用固件已改为控制面。
 
 ## 上位机
 
 ```bat
 pip install -r sw\host\requirements.txt
-
-:: PC 网卡设 192.168.1.100/24，网线连板卡 PS 网口
-
 python sw\host\video_sender.py --ip 192.168.1.10 --image sim_out\src.png --fps 30
 ```
 
-收满一帧后 PS 自动 `src_sel=1`，HDMI 左右应变为上位机画面。
+目的 IP/端口保持 192.168.1.10:5001，PL 侧按端口过滤（不强制校验目的 IP）。
 
-串口 `STAT` 可看 `frames=` 计数。
+## Vitis
 
-## 串口命令（与以太网并行）
-
-| 命令 | 作用 |
-|------|------|
-| `00111` | 效果使能（仍作用于 UDP 图） |
-| `SRC0` / `SRC1` | 彩条 / DDR |
-| `FILL` | 本地渐变测试 |
-| `STAT` | 帧计数 |
+1. Platform 可不启用 lwip（控制面无网络依赖）
+2. 源码：`sw/ps/main.c`
+3. UART：`00111` / `SRC1` / `STAT`
 
 ## 排障
 
 | 现象 | 处理 |
 |------|------|
-| 无 `[NET]` | lwip/BSP 未进 Platform；ENET0 未在 XSA |
-| ping 不通 | IP/掩码、防火墙、是否 PS 口（非 PL eth1） |
-| ping 通画面不变 | `STAT` 看 frames 是否增加；是否发满一帧 |
-| 画面撕裂 | 降低 fps；确认 `Xil_DCacheFlushRange` 已调用 |
-| 只有彩条 | 发 `SRC1` 或等第一帧自动切换 |
+| 无画面 | 是否插在 **PL 口**；`eth_rst_n` 复位完成；link 灯 |
+| OSD NET 不涨 | 查 RGMII 管脚、时钟、端口 5001 |
+| 画面撕裂 | 降低 fps；确认 eth 直写 BRAM 与显示 vsync |
+| 仍走 PS 收包 | 旧 ELF/lwIP；改用新 `main.c` |
 
 ## PC 静态 IP（Windows）
 

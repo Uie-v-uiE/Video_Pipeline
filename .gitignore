@@ -1,9 +1,13 @@
-# Build / IDE
-vivado/
-vivado_sim/
+# =========================
+# Vivado / Vitis build junk
+# =========================
+# Keep: rtl/ constraints/ tcl/ sim/ scripts/ sw/ docs/ skill/ output/bit+xsa
+# Drop: project caches, run logs, simulator work dirs
+
 vivado_system/
+vivado_sim/
 vivado_proj/
-vitis/
+.Xil/
 *.xpr
 *.jou
 *.log
@@ -11,7 +15,8 @@ vitis/
 *.pb
 *.wdb
 *.wcfg
-.Xil/
+*.dcp
+*.ltx
 *.cache/
 *.runs/
 *.hw/
@@ -19,39 +24,71 @@ vitis/
 *.gen/
 *.sim/
 *.srcs/
+*.nstr
+*.debug
+*.diags
+hs_err_pid*.log
+vivado*.zip
 
-# Vitis workspace: keep app src only
-vitis_udp/platform/
-vitis_udp/**/build/
-vitis_udp/**/_ide/
-vitis_udp/**/.rigel_lopper*/
-vitis_udp/**/*.elf
-vitis_udp/**/*.o
-vitis_udp/**/CMakeCache.txt
-vitis_udp/**/CMakeFiles/
-vitis_udp/**/cmake_install.cmake
+# Vitis workspaces (keep source under sw/, not full workspace)
+vitis/
+vitis_udp/
+vitis_prj/
+*.elf
+*.o
+*.a
+*.bif
+*.mss
+*.hdf
+.sdk/
+.XSCT/
+*.xsa.bak
 
-# Reports / large intermediates
-output/*.ltx
+# Simulation artifacts
+vivado_sim/
+*.vcd
+*.vvp
+xsim.dir/
+xvlog*
+xelab*
+xsim*
+webtalk*
+*.jou
+
+# =========================
+# Outputs worth keeping
+# =========================
+# Keep system.bit / system.xsa / reports for reproducibility
+!output/system.bit
+!output/system.xsa
 output/*.dcp
-output/*.rpt
+output/*.ltx
 output/*.png
 
-# Python
+# =========================
+# Python host
+# =========================
 __pycache__/
 *.pyc
 .venv/
+*.egg-info/
 
-# OS / editor
-Thumbs.db
-.DS_Store
-*.swp
-.vscode/
-.idea/
-
-# Host media / tools
+# =========================
+# Media / large binaries
+# =========================
 sw/host/test.mjpeg
-tools/
 *.mp4
 *.mkv
 *.avi
+*.mov
+tools/
+
+# =========================
+# OS / editor
+# =========================
+Thumbs.db
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/

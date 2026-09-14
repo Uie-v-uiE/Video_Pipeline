@@ -26,9 +26,39 @@ set_property -dict {PACKAGE_PIN V17 IOSTANDARD TMDS_33} [get_ports {tmds_data_n[
 set_property -dict {PACKAGE_PIN U15 IOSTANDARD TMDS_33} [get_ports {tmds_data_p[2]}]
 set_property -dict {PACKAGE_PIN U16 IOSTANDARD TMDS_33} [get_ports {tmds_data_n[2]}]
 
-## Generated clocks (after MMCM)
-# clk_pix 75 MHz, clk_pix5x 375 MHz — created by MMCM automatically
+## ---- PL ETH PHY2 RGMII (RTL8211F @ BANK 33, 3.3V) ----
+## Source: schematic page 5 BANK33
+set_property -dict {PACKAGE_PIN Y19 IOSTANDARD LVCMOS33} [get_ports eth_rxc]
+set_property -dict {PACKAGE_PIN V19 IOSTANDARD LVCMOS33} [get_ports eth_rx_ctl]
+set_property -dict {PACKAGE_PIN W20 IOSTANDARD LVCMOS33} [get_ports {eth_rxd[0]}]
+set_property -dict {PACKAGE_PIN W21 IOSTANDARD LVCMOS33} [get_ports {eth_rxd[1]}]
+set_property -dict {PACKAGE_PIN U20 IOSTANDARD LVCMOS33} [get_ports {eth_rxd[2]}]
+set_property -dict {PACKAGE_PIN V20 IOSTANDARD LVCMOS33} [get_ports {eth_rxd[3]}]
+set_property -dict {PACKAGE_PIN AB22 IOSTANDARD LVCMOS33} [get_ports eth_tx_clk]
+set_property -dict {PACKAGE_PIN AB21 IOSTANDARD LVCMOS33} [get_ports eth_tx_ctl]
+set_property -dict {PACKAGE_PIN T21 IOSTANDARD LVCMOS33} [get_ports {eth_txd[0]}]
+set_property -dict {PACKAGE_PIN U21 IOSTANDARD LVCMOS33} [get_ports {eth_txd[1]}]
+set_property -dict {PACKAGE_PIN AA22 IOSTANDARD LVCMOS33} [get_ports {eth_txd[2]}]
+set_property -dict {PACKAGE_PIN AA21 IOSTANDARD LVCMOS33} [get_ports {eth_txd[3]}]
+set_property -dict {PACKAGE_PIN AB20 IOSTANDARD LVCMOS33} [get_ports eth_mdc]
+set_property -dict {PACKAGE_PIN AB19 IOSTANDARD LVCMOS33} [get_ports eth_mdio]
+set_property -dict {PACKAGE_PIN Y21 IOSTANDARD LVCMOS33} [get_ports eth_rst_n]
+
+## RGMII RX clock from PHY (125 MHz at 1G)
+create_clock -period 8.000 -name eth_rxc [get_ports eth_rxc]
+set_false_path -from [get_ports eth_rst_n]
+set_false_path -to [get_ports eth_rst_n]
+set_false_path -to [get_ports eth_tx_clk]
+set_false_path -to [get_ports eth_tx_ctl]
+set_false_path -to [get_ports {eth_txd[*]}]
+
+# CDC: eth_rxc (125M) <-> FCLK (100M) via dc_fifo — async groups
+set_clock_groups -asynchronous \
+  -group [get_clocks eth_rxc] \
+  -group [get_clocks clk_fpga_0] \
+  -group [get_clocks sys_clk]
 
 ## False paths for async controls
 set_false_path -from [get_ports key1_n]
 set_false_path -from [get_ports key2_n]
+

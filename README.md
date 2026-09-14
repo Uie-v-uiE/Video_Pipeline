@@ -1,15 +1,15 @@
 # Zynq7020 以太网视频处理与 HDMI 双窗显示
 
-上位机经 **UDP** 推送 RGB565 视频到 Zynq PS，写入 DDR；PL 侧经 AXI HP0 读出，完成 **5 种图像处理** 与 **0–359° 任意角旋转**，以 **左原图 / 右处理结果** 双窗输出 **HDMI 1024×600**。
+上位机经 **UDP** 推送 RGB565 视频；**PL 侧硬件完成** RGMII 收包、ARP/ICMP/UDP 协议、帧重组、图像处理与 HDMI 输出；**PS 仅做控制面**（串口命令、效果使能）。
 
 | 项 | 值 |
 |----|-----|
 | 板卡 | RK-ZYNQ7020-F（XC7Z020-CLG484-2） |
 | 工具 | Vivado / Vitis **2025.2.1** |
-| 源分辨率 | 512×300 RGB565 |
-| 显示 | 1024×600 @ 50 MHz，左右各 512，垂直 2× |
-| 网络 | 板卡 192.168.1.10:5001，PC 192.168.1.100 |
-| 控制 | AXI GPIO @ 0x41200000，UART 115200 |
+| 源分辨率 | **512×300 RGB565**（维持原分辨率） |
+| 显示 | HDMI **1024×600 @ 50 MHz**，左原图 / 右处理，垂直 2× |
+| 网络 | 板卡 **PL 网口** `192.168.1.10:5001`，PC `192.168.1.100` |
+| 控制 | AXI GPIO @ `0x41200000`，UART 115200 |
 | 许可 | MIT |
 
 ---
@@ -19,39 +19,37 @@
 ```
 zynq_video_pipeline/
 ├── README.md                 本文件
-├── LICENSE                   MIT
 ├── .gitignore
+├── LICENSE
 ├── rtl/                      PL 源码
-│   ├── top/                  system_top, pl_video_top, pl_demo_top
-│   ├── video/                时序、彩条、分屏、frame_buffer(_db)、osd_overlay
+│   ├── top/                  system_top, pl_video_top
+│   ├── eth/                  PL 以太网协议栈（RGMII/ARP/ICMP/UDP）
+│   ├── video/                时序、彩条、分屏、帧缓、OSD
 │   ├── process/              五效果流水线 + rotate/
 │   ├── axi/                  axi_frame_writer（HP0 读 DDR）
 │   ├── hdmi/                 TMDS 编码串化
-│   ├── clocks/               MMCM
+│   ├── clocks/               MMCM（50/250/200 MHz）
 │   └── util/                 按键消抖
-├── constraints/              管脚与时序 XDC
+├── constraints/              rk_zynq7020.xdc（含 PL ETH PHY2）
 ├── tcl/                      Vivado 一键脚本
-├── sim/                      单元仿真
+├── sim/                      单元/集成仿真
 ├── scripts/                  金标模型、sin/cos ROM
 ├── sw/
-│   ├── ps/                   裸机源码（与 Vitis 同步）
-│   └── host/                 上位机 UDP / 一键脚本
-├── skill/                    竞赛技能包
-├── docs/                     全部设计文档
-├── output/                   bit / xsa / 时序报告
+│   ├── ps/                   PS 控制面（串口 + AXI GPIO）
+│   └── host/                 上位机 UDP 推流
+├── skill/                    可复用技能包
+├── docs/                     设计文档（见下）
+├── output/                   system.bit / system.xsa / 时序报告
 └── sim_out/                  金标图输出
 ```
 
-**新增文件：**
-- `rtl/video/frame_buffer_db.v` — 双缓冲防撕裂
-- `rtl/video/osd_overlay.v` — 屏上显示角度/效果/FPS
-- `docs/TIMING_REPORT.md` — 时序优化记录 v1→v4
-└── output/                   bit / xsa / 报告输出
-```
+**本机工程位置（不入库）：**
 
-**Vivado 工程：** `vivado_system/`（由 `tcl/build_system_axigpio.tcl` 生成）  
-**Vitis 工作区：** `vitis_udp/`（Platform + app_component）  
-两者均已 `.gitignore`，可用 TCL 从零复现。
+| 工程 | 路径 |
+|------|------|
+| Vivado 工程 | `D:\Xilinx\Prj\video_pl\zynq_video_pipeline\vivado_system\zynq_video_sys.xpr` |
+| Vitis 工作区 | `D:\Xilinx\Prj\video_pl\zynq_video_pipeline\vitis_udp\`（或 `vitis_prj\`） |
+| 仓库根 | `D:\Xilinx\Prj\video_pl\zynq_video_pipeline\` |
 
 ---
 
@@ -60,29 +58,33 @@ zynq_video_pipeline/
 ### 1. 生成比特流
 
 ```bat
-cd /d <仓库根目录>
+cd /d D:\Xilinx\Prj\video_pl\zynq_video_pipeline
 set VIVADO=D:\Software\Vivado\2025.2.1\Vivado\bin\vivado.bat
 %VIVADO% -mode batch -source tcl\build_system_axigpio.tcl
+```
+
+产物：`output/system.bit`、`output/system.xsa`
+
+### 2. 下载比特流
+
+```bat
 %VIVADO% -mode batch -source tcl\program_system.tcl
 ```
 
-### 2. Vitis 编译下载
+### 3. Vitis 下载 PS ELF（串口命令需要）
 
-1. 用 Vitis 打开工作区 `vitis_udp`
-2. Platform 需含 **lwip220**（链路速率建议 `CONFIG_LINKSPEED1000`）
-3. Build Platform → Build app_component → **Run**
+1. 用 Vitis 打开工作区，Platform 使用最新 `output/system.xsa`
+2. 应用源码：`sw/ps/main.c`
+3. Build → Run
 
-### 3. 推流
+### 4. 推流
 
 ```bat
-:: 内置动画（自检）
+:: PC 网卡 192.168.1.100/24，网线接 PL 网口
 sw\host\run_sender.bat
-
-:: 真实视频（需带 H.264 的完整 FFmpeg）
+:: 或真实视频
 sw\host\run_video.bat D:\path\to\video.mp4
 ```
-
-PC 网卡：`192.168.1.100/24`，网线接 **PS ETH**。
 
 ---
 
@@ -94,15 +96,15 @@ PC 网卡：`192.168.1.100/24`，网线接 **PS ETH**。
 | `10000` | 灰度 |
 | `01000` | 二值化 |
 | `00111` | 模糊+Sobel+反色 |
-| `00110` | 模糊+Sobel |
 | `SRC0` / `SRC1` | 彩条 / DDR 视频 |
 | `TH80` | 二值化阈值 |
-| `FILL` | 2×2 诊断色块 |
-| `STAT` | 帧计数与网口状态 |
+| `FILL` | 诊断色块 |
+| `STAT` | 状态 |
 
-效果位：**左起 = bit0**，顺序 gray / binary / blur / sobel / invert。
+效果位顺序：**gray / binary / blur / sobel invert**（左起 bit0）
 
-**旋转时：** angle≠0 自动旁路 blur、sobel（窗口滤波与旋转坐标不兼容）；gray、binary、invert 仍有效。详见 `docs/KNOWLEDGE.md`。
+**注意：** 下载 bit 后 PS 会复位，必须再 Vitis Run 一次 ELF，串口才有效。  
+ETH 有包时会**自动切到视频画面**，不依赖 `SRC1`。
 
 ---
 
@@ -111,30 +113,24 @@ PC 网卡：`192.168.1.100/24`，网线接 **PS ETH**。
 | 文档 | 内容 |
 |------|------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 数据通路、时钟、带宽、模块框图 |
-| [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md) | 关键知识点与设计决策 |
-| [docs/ISSUES.md](docs/ISSUES.md) | 开发中遇到的问题与修复 |
-| [docs/COMPETITION.md](docs/COMPETITION.md) | 2026 AMD 自主选题提交清单 |
-| [docs/PROJECT_LAYOUT.md](docs/PROJECT_LAYOUT.md) | 工程路径与复现步骤 |
+| [docs/MODULES.md](docs/MODULES.md) | 各模块详解 |
+| [docs/ISSUES.md](docs/ISSUES.md) | 问题与修复记录 |
+| [docs/PS_VS_PL.md](docs/PS_VS_PL.md) | PS 软件 vs PL 硬件方案对比 |
 | [docs/ETH_BRINGUP.md](docs/ETH_BRINGUP.md) | 以太网上板 |
-| [docs/SYSTEM_BRINGUP.md](docs/SYSTEM_BRINGUP.md) | 系统工程上板 |
-| [docs/ROTATION_AND_EFFECTS.md](docs/ROTATION_AND_EFFECTS.md) | 旋转与效果关系 |
-| [docs/TIMING_REPORT.md](docs/TIMING_REPORT.md) | 时序分析（需自行导出） |
-| [docs/LLM_ASSIST_LOG.md](docs/LLM_ASSIST_LOG.md) | 大模型协作记录 |
-| [skill/README.md](skill/README.md) | 可复用技能包 |
+| [docs/ROTATION_AND_EFFECTS.md](docs/ROTATION_AND_EFFECTS.md) | 旋转与效果（目标域重构） |
+| [docs/PERF_REPORT.md](docs/PERF_REPORT.md) | 性能对比 |
+| [docs/COMPETITION.md](docs/COMPETITION.md) | 竞赛提交清单 |
+| [docs/BOARD_PINS.md](docs/BOARD_PINS.md) | 管脚 |
+| [skill/README.md](skill/README.md) | 技能包 |
 
 ---
 
 ## 关键设计摘要
 
-- **PS/PL 分工：** PS 做协议与 DDR 写入；PL 做像素流水线与 HDMI
-- **控制字：** `en[4:0] | thr[7:8] | src[16]`，经 AXI GPIO GP0
-- **DDR 帧：** 0x10000000，512×300×2 = 307200 B；收满一帧 `DCacheFlush` 后再给 PL 读
-- **AXI HP0：** 64-bit，16-beat burst（AXI3 上限），每 beat 4 个 RGB565
-- **旋转：** 逆映射 + Q8 sin/cos ROM；angle=0 旁路 mapper 保持流水线对齐
-- **为何不用 EMIO：** 本板 EMIO bank 读回异常，控制走 GP0 AXI GPIO
+- **PL 网口硬件协议栈**：RGMII → ARP/ICMP/UDP → offset 拼帧 → BRAM/DDR  
+- **PS 只做控制**：UART → AXI GPIO → 效果使能  
+- **目标域窗滤**：任意旋转角下 blur/sobel 可用（不再旁路）  
+- **OSD**：左上角三行状态（FPS/ANG/EN）  
+- **协议兼容**：上位机 `[u32 LE offset][payload]` 无需修改  
 
----
-
-## 许可与声明
-
-MIT License。面向教学与 FPGA 创新竞赛。使用前请按实际原理图核对管脚与 PHY 型号。
+详见 `docs/ARCHITECTURE.md` 与 `docs/ISSUES.md`。

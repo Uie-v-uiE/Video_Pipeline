@@ -9,7 +9,7 @@ module proc_pipeline #(
     input  wire        rst_n,
     input  wire [4:0]  effect_en,
     input  wire [7:0]  threshold,
-    input  wire        rotate_active, // bypass window filters
+    input  wire        rotate_active, // retained for status; window filters run in target domain
     input  wire        hs_in,
     input  wire        vs_in,
     input  wire        de_in,
@@ -19,10 +19,12 @@ module proc_pipeline #(
     output wire        de_out,
     output wire [15:0] dout
 );
+    // Point ops + window ops all operate on the already inverse-mapped raster
+    // (screen/canvas domain). 3x3 neighborhood is valid for any rotation angle.
     wire by0 = ~effect_en[0];
     wire by1 = ~effect_en[1];
-    wire by2 = ~effect_en[2] | rotate_active;
-    wire by3 = ~effect_en[3] | rotate_active;
+    wire by2 = ~effect_en[2];
+    wire by3 = ~effect_en[3];
     wire by4 = ~effect_en[4];
 
     wire        de0; wire [15:0] d0;

@@ -11,6 +11,25 @@
 | pl_led1 | V15 | 心跳 / 帧有效 |
 | pl_led2 | V13 | 效果使能指示 |
 
+## PL ETH PHY2 RGMII（原理图页 5 BANK33）
+| 信号 | 封装脚 |
+|------|--------|
+| eth_rxc | Y19 |
+| eth_rx_ctl | V19 |
+| eth_rxd[0] | W20 |
+| eth_rxd[1] | W21 |
+| eth_rxd[2] | U20 |
+| eth_rxd[3] | V20 |
+| eth_tx_clk | AB22 |
+| eth_tx_ctl | AB21 |
+| eth_txd[0] | T21 |
+| eth_txd[1] | U21 |
+| eth_txd[2] | AA22 |
+| eth_txd[3] | AA21 |
+| eth_mdc | AB20 |
+| eth_mdio | AB19 |
+| eth_rst_n | Y21 |
+
 ## HDMI OUT (TMDS)
 | 信号 | 封装脚 |
 |------|--------|
