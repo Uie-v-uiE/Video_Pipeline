@@ -1,4 +1,4 @@
-# Synthesize + implement + bitstream
+﻿# Synthesize + implement + bitstream
 # Usage: vivado -mode batch -source tcl/build_bitstream.tcl
 # Optional arg: pl|system (default pl)
 
@@ -37,7 +37,7 @@ if {$mode eq "pl"} {
 puts "BITSTREAM: $bit"
 
 # Copy to output/
-set outdir [file join $root output]
+set outdir [file join $root build]
 file mkdir $outdir
 file copy -force $bit [file join $outdir video_pipeline.bit]
 
@@ -48,3 +48,4 @@ if {$mode eq "system"} {
 }
 
 puts "DONE"
+

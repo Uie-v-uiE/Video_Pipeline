@@ -1,12 +1,15 @@
+# Local-only signup notes (do not publish)
+_local_signup_only.md
+
 # =========================
 # Vivado / Vitis build junk
 # =========================
-# Keep: rtl/ constraints/ tcl/ sim/ scripts/ sw/ docs/ skill/ output/bit+xsa
-# Drop: project caches, run logs, simulator work dirs
-
 vivado_system/
 vivado_sim/
 vivado_proj/
+vitis/
+vitis_udp/
+vitis_prj/
 .Xil/
 *.xpr
 *.jou
@@ -28,64 +31,34 @@ vivado_proj/
 *.debug
 *.diags
 hs_err_pid*.log
-vivado*.zip
-
-# Vitis workspaces (keep source under sw/, not full workspace)
-vitis/
-vitis_udp/
-vitis_prj/
-*.elf
-*.o
-*.a
-*.bif
-*.mss
-*.hdf
-.sdk/
-.XSCT/
-*.xsa.bak
-
-# Simulation artifacts
-vivado_sim/
-*.vcd
-*.vvp
+webtalk*
 xsim.dir/
 xvlog*
 xelab*
 xsim*
-webtalk*
-*.jou
+*.vcd
+*.elf
+*.o
+*.a
 
-# =========================
-# Outputs worth keeping
-# =========================
-# Keep system.bit / system.xsa / reports for reproducibility
-!output/system.bit
-!output/system.xsa
-output/*.dcp
-output/*.ltx
-output/*.png
+# Keep competition deliverables
+!build/system.bit
+!build/system.xsa
+!build/reports/*.rpt
 
-# =========================
-# Python host
-# =========================
+# Python
 __pycache__/
 *.pyc
 .venv/
-*.egg-info/
 
-# =========================
-# Media / large binaries
-# =========================
-sw/host/test.mjpeg
+# Media
 *.mp4
 *.mkv
 *.avi
 *.mov
-tools/
+src/host/test.mjpeg
 
-# =========================
 # OS / editor
-# =========================
 Thumbs.db
 .DS_Store
 *.swp

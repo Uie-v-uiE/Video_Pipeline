@@ -1,4 +1,4 @@
-# Create Vivado project for Zynq7020 video pipeline (Vivado 2025.2.x)
+﻿# Create Vivado project for Zynq7020 video pipeline (Vivado 2025.2.x)
 # Usage:
 #   vivado -mode batch -source tcl/create_project.tcl -tclargs pl
 #   vivado -mode batch -source tcl/create_project.tcl -tclargs system
@@ -19,12 +19,12 @@ set_property default_lib xil_defaultlib [current_project]
 # ---- RTL ----
 set rtl_files {}
 foreach d {util clocks video process process/rotate axi hdmi top} {
-  foreach f [glob -nocomplain [file join $root rtl $d *.v]] {
+  foreach f [glob -nocomplain [file join $root src rtl $d *.v]] {
     lappend rtl_files $f
   }
 }
 add_files -norecurse $rtl_files
-add_files -fileset constrs_1 -norecurse [file join $root constraints rk_zynq7020.xdc]
+add_files -fileset constrs_1 -norecurse [file join $root src constraints rk_zynq7020.xdc]
 
 if {$mode eq "pl"} {
   set_property top pl_demo_top [current_fileset]
@@ -35,7 +35,7 @@ if {$mode eq "pl"} {
 # ---- System: PS7 + interconnect + external HP0 + EMIO GPIO ----
 create_bd_design design_1
 
-# Zynq PS (preset not used — configure explicitly for this board)
+# Zynq PS (preset not used 鈥?configure explicitly for this board)
 create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0
 set ps [get_bd_cells processing_system7_0]
 
@@ -95,7 +95,7 @@ connect_bd_intf_net [get_bd_intf_pins axi_mem_intercon/M00_AXI] \
 
 # Externalize interconnect slave as M_AXI_HP0 (PL is master)
 make_bd_intf_pins_external [get_bd_intf_pins axi_mem_intercon/S00_AXI]
-# Name may be S00_AXI_0 — normalize
+# Name may be S00_AXI_0 鈥?normalize
 set intf_ports [get_bd_intf_ports]
 foreach p $intf_ports {
   if {[string match *S00* $p] || [string match *S00_AXI* $p]} {
@@ -141,3 +141,4 @@ puts "INFO: System project. Top=system_top"
 puts "PROJECT: [file join $proj_dir ${proj_name}.xpr]"
 puts "NOTE: If system_top port names fail, open BD and rename externals to match rtl/top/system_top.v"
 }
+

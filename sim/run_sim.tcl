@@ -1,4 +1,4 @@
-# Behavioral simulation via xsim CLI
+﻿# Behavioral simulation via xsim CLI
 # Usage: vivado -mode batch -source sim/run_sim.tcl
 
 set root [file normalize [file join [file dirname [info script]] ..]]
@@ -8,7 +8,7 @@ cd $work
 
 set rtl_files {}
 foreach d {util clocks video process process/rotate axi hdmi eth} {
-  foreach f [glob -nocomplain [file join $root rtl $d *.v]] { lappend rtl_files $f }
+  foreach f [glob -nocomplain [file join $root src rtl $d *.v]] { lappend rtl_files $f }
 }
 
 set tb_list {
@@ -60,3 +60,4 @@ foreach tb $tb_list {
 
 puts "SIM-SUMMARY pass=$pass fail=$fail"
 puts "SIM-FINISHED"
+

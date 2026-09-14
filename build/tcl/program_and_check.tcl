@@ -1,7 +1,7 @@
-# Program FPGA and report timing path
+﻿# Program FPGA and report timing path
 set root [file normalize [file join [file dirname [info script]] ..]]
-set bit [file join $root output video_pipeline.bit]
-set rpt [file join $root output timing_summary.rpt]
+set bit [file join $root build video_pipeline.bit]
+set rpt [file join $root build timing_summary.rpt]
 
 open_hw_manager
 connect_hw_server -allow_non_jtag
@@ -24,3 +24,4 @@ if {[file exists $xpr]} {
   }
 }
 puts "DONE"
+

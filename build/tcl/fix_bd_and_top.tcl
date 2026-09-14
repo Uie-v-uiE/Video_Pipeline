@@ -1,8 +1,8 @@
-# Fix BD: export FCLK/RESET, assign HP0 address, then rebuild
+﻿# Fix BD: export FCLK/RESET, assign HP0 address, then rebuild
 set root [file normalize [file join [file dirname [info script]] ..]]
 set proj_dir [file join $root vivado_system]
 set proj_name zynq_video_sys
-set outdir [file join $root output]
+set outdir [file join $root build]
 file mkdir $outdir
 
 open_project [file join $proj_dir ${proj_name}.xpr]
@@ -54,7 +54,7 @@ set fp [open $wrap r]; set wt [read $fp]; close $fp
 puts "WRAPPER exists, len=[string length $wt]"
 
 # Write matching system_top
-set sys [file join $root rtl top system_top.v]
+set sys [file join $root src rtl top system_top.v]
 set fp [open $sys w]
 puts $fp {`timescale 1ns/1ps}
 puts $fp {module system_top (}
@@ -134,7 +134,7 @@ puts $fp {        // fall back: use MMCM from sys_clk for axi domain if FCLK not
 puts $fp {      end}
 puts $fp {    endgenerate}
 puts $fp {}
-puts $fp {    // Prefer FCLK if present in wrapper — bind via defparam-less instance}
+puts $fp {    // Prefer FCLK if present in wrapper 鈥?bind via defparam-less instance}
 puts $fp {    // Read note: wrapper currently has no FCLK ports; use 100MHz from clk_gen extra}
 puts $fp {    // Use sys_clk through a simple BUFG as axi clock for demo (50MHz) OR}
 puts $fp {    // generate 100MHz: 50*2}
@@ -150,7 +150,7 @@ puts $fp {        .PWRDWN(1'b0), .RST(1'b0), .LOCKED(mmcm_locked_axi));}
 puts $fp {    BUFG u_bg_fb_axi (.I(clk_axi_fb), .O(clk_axi_fb_buf));}
 puts $fp {    BUFG u_bg_axi (.I(clk_axi_raw), .O(clk_axi));}
 puts $fp {    assign rst_axi_n = mmcm_locked_axi;}
-puts $fp {    // NOTE: true PS FCLK is better — we will fix BD export next if needed.}
+puts $fp {    // NOTE: true PS FCLK is better 鈥?we will fix BD export next if needed.}
 puts $fp {    // For HP0 ACLK must be FCLK0 from PS. So this MMCM clock is NOT valid for HP0.}
 puts $fp {}
 puts $fp {    assign gpio_i = status;}
@@ -172,4 +172,5 @@ puts $fp {        .status(status));}
 puts $fp {endmodule}
 close $fp
 puts "WROTE system_top (partial)"
-puts "NOTE: FCLK export and AXI3 arlen still need RTL fix — see next script"
+puts "NOTE: FCLK export and AXI3 arlen still need RTL fix 鈥?see next script"
+

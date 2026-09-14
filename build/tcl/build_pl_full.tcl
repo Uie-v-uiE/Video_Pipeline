@@ -1,4 +1,4 @@
-# Full flow: create PL project + synth + impl + bitstream
+﻿# Full flow: create PL project + synth + impl + bitstream
 set root [file normalize [file join [file dirname [info script]] ..]]
 set proj_dir [file join $root vivado]
 set proj_name zynq_video_pipeline
@@ -10,12 +10,12 @@ set_property simulator_language Mixed [current_project]
 
 set rtl_files {}
 foreach d {util clocks video process process/rotate axi hdmi top} {
-  foreach f [glob -nocomplain [file join $root rtl $d *.v]] {
+  foreach f [glob -nocomplain [file join $root src rtl $d *.v]] {
     lappend rtl_files $f
   }
 }
 add_files -norecurse $rtl_files
-add_files -fileset constrs_1 -norecurse [file join $root constraints rk_zynq7020.xdc]
+add_files -fileset constrs_1 -norecurse [file join $root src constraints rk_zynq7020.xdc]
 set_property top pl_demo_top [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -38,7 +38,7 @@ if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
 }
 
 set bit [file join $proj_dir ${proj_name}.runs impl_1 pl_demo_top.bit]
-set outdir [file join $root output]
+set outdir [file join $root build]
 file mkdir $outdir
 file copy -force $bit [file join $outdir video_pipeline.bit]
 puts "BIT: [file join $outdir video_pipeline.bit]"
@@ -48,3 +48,4 @@ open_run impl_1
 report_timing_summary -file [file join $outdir timing_summary.rpt]
 puts "TIMING REPORT: [file join $outdir timing_summary.rpt]"
 puts "BUILD OK"
+

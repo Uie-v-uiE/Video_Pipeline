@@ -1,9 +1,9 @@
-# System with AXI GPIO on GP0 + PL ETH video sink
+﻿# System with AXI GPIO on GP0 + PL ETH video sink
 set root [file normalize [file join [file dirname [info script]] ..]]
 set proj_dir [file join $root vivado_system]
 set proj_name zynq_video_sys
 set part xc7z020clg484-2
-set outdir [file join $root output]
+set outdir [file join $root build]
 file mkdir $outdir
 
 create_project $proj_name $proj_dir -part $part -force
@@ -11,12 +11,12 @@ set_property target_language Verilog [current_project]
 
 set rtl_files {}
 foreach d {util clocks video process process/rotate axi hdmi eth} {
-  foreach f [glob -nocomplain [file join $root rtl $d *.v]] { lappend rtl_files $f }
+  foreach f [glob -nocomplain [file join $root src rtl $d *.v]] { lappend rtl_files $f }
 }
-lappend rtl_files [file join $root rtl top pl_video_top.v]
-lappend rtl_files [file join $root rtl top system_top.v]
+lappend rtl_files [file join $root src rtl top pl_video_top.v]
+lappend rtl_files [file join $root src rtl top system_top.v]
 add_files -norecurse $rtl_files
-add_files -fileset constrs_1 -norecurse [file join $root constraints rk_zynq7020.xdc]
+add_files -fileset constrs_1 -norecurse [file join $root src constraints rk_zynq7020.xdc]
 
 create_bd_design design_1
 create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0
@@ -138,3 +138,4 @@ write_hw_platform -fixed -include_bit -force -file [file join $outdir system.xsa
 puts "BIT: [file join $outdir system.bit]"
 puts "XSA: [file join $outdir system.xsa]"
 puts "SYSTEM BUILD DONE"
+

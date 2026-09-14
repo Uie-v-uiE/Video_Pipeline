@@ -1,9 +1,9 @@
-# Rebuild system BD with FCLK export + address assign + matching system_top
+﻿# Rebuild system BD with FCLK export + address assign + matching system_top
 set root [file normalize [file join [file dirname [info script]] ..]]
 set proj_dir [file join $root vivado_system]
 set proj_name zynq_video_sys
 set part xc7z020clg484-2
-set outdir [file join $root output]
+set outdir [file join $root build]
 file mkdir $outdir
 
 # Fresh project
@@ -12,11 +12,11 @@ set_property target_language Verilog [current_project]
 
 set rtl_files {}
 foreach d {util clocks video process process/rotate axi hdmi} {
-  foreach f [glob -nocomplain [file join $root rtl $d *.v]] { lappend rtl_files $f }
+  foreach f [glob -nocomplain [file join $root src rtl $d *.v]] { lappend rtl_files $f }
 }
-lappend rtl_files [file join $root rtl top pl_video_top.v]
+lappend rtl_files [file join $root src rtl top pl_video_top.v]
 add_files -norecurse $rtl_files
-add_files -fileset constrs_1 -norecurse [file join $root constraints rk_zynq7020.xdc]
+add_files -fileset constrs_1 -norecurse [file join $root src constraints rk_zynq7020.xdc]
 
 create_bd_design design_1
 create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:5.5 processing_system7_0
@@ -110,11 +110,11 @@ puts "HAS FCLK_RESET0_N: [string match *FCLK_RESET0_N* $wt]"
 puts "HAS arlen: [regexp {M_AXI_HP0_arlen} $wt]"
 
 # Write system_top matching wrapper
-set sys [file join $root rtl top system_top.v]
+set sys [file join $root src rtl top system_top.v]
 set fp [open $sys w]
 puts $fp "`timescale 1ns/1ps"
 puts $fp {
-// System top — generated to match design_1_wrapper (Vivado 2025.2)
+// System top 鈥?generated to match design_1_wrapper (Vivado 2025.2)
 module system_top (
     inout  wire        DDR_cas_n,
     inout  wire        DDR_cke,
@@ -231,3 +231,4 @@ write_hw_platform -fixed -include_bit -force -file [file join $outdir system.xsa
 puts "BIT: [file join $outdir system.bit]"
 puts "XSA: [file join $outdir system.xsa]"
 puts "SYSTEM BUILD DONE"
+

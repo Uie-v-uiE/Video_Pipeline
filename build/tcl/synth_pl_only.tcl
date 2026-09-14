@@ -1,4 +1,4 @@
-# Quick synth smoke for pl_demo_top (catches RTL issues without full impl)
+﻿# Quick synth smoke for pl_demo_top (catches RTL issues without full impl)
 # Usage: vivado -mode batch -source tcl/synth_pl_only.tcl
 set root [file normalize [file join [file dirname [info script]] ..]]
 set proj_dir [file join $root vivado]
@@ -6,12 +6,12 @@ set proj_dir [file join $root vivado]
 create_project synth_smoke $proj_dir -part xc7z020clg484-2 -force
 set rtl_files {}
 foreach d {util clocks video process process/rotate axi hdmi top} {
-  foreach f [glob -nocomplain [file join $root rtl $d *.v]] {
+  foreach f [glob -nocomplain [file join $root src rtl $d *.v]] {
     lappend rtl_files $f
   }
 }
 add_files -norecurse $rtl_files
-add_files -fileset constrs_1 -norecurse [file join $root constraints rk_zynq7020.xdc]
+add_files -fileset constrs_1 -norecurse [file join $root src constraints rk_zynq7020.xdc]
 set_property top pl_demo_top [current_fileset]
 update_compile_order -fileset sources_1
 
@@ -36,3 +36,4 @@ if {[string match *Complete* $status] || [string match *Finished* $status]} {
     }
   }
 }
+
