@@ -1,152 +1,135 @@
-# Zynq7020 Ethernet Video Pipeline
+# Zynq7020 以太网视频处理流水线
 
-UDP video from PC → **PL hardware** (RGMII / ARP / ICMP / UDP / frame reassembly) → image processing → HDMI dual-pane display.  
-PS is **control-plane only** (UART + AXI GPIO).
+上位机经 **UDP** 推送 RGB565 视频；**PL 硬件**完成 RGMII 收包、ARP/ICMP/UDP 协议、帧重组、图像处理与 HDMI 双窗输出；**PS 仅做控制面**（串口命令、效果使能）。
 
-| Item | Value |
-|------|--------|
-| Board | RK-ZYNQ7020-F (XC7Z020-CLG484-2) |
-| Tool | Vivado / Vitis **2025.2.1** |
-| Source | **512×300 RGB565** |
-| Display | HDMI **1024×600 @ 50 MHz**, left original / right processed, 2× vertical |
-| Network | Board **PL ETH** `192.168.1.10:5001`, PC `192.168.1.100` |
-| Control | AXI GPIO @ `0x41200000`, UART 115200 |
-| License | MIT |
+| 项 | 值 |
+|----|-----|
+| 板卡 | RK-ZYNQ7020-F（XC7Z020-CLG484-2） |
+| 工具 | Vivado / Vitis **2025.2.1** |
+| 源分辨率 | **512×300 RGB565** |
+| 显示 | HDMI **1024×600 @ 50 MHz**，左原图 / 右处理，垂直 2× |
+| 网络 | 板卡 **PL 网口** `192.168.1.10:5001`，PC `192.168.1.100` |
+| 控制 | AXI GPIO @ `0x41200000`，UART 115200 |
+| 协议 | MIT |
 
 ---
 
-## Directory layout
+## 目录结构
 
-Follows the competition recommended structure (all names English).
+按竞赛推荐结构组织（目录与文件名均为英文）：
 
 ```
 <project_name>/
 ├── README.md
-├── src/                      # Design sources
-│   ├── rtl/                  # Verilog (top / eth / video / process / axi / hdmi)
-│   ├── ps/                   # Bare-metal control (UART + GPIO)
-│   ├── host/                 # PC UDP sender
-│   └── constraints/          # XDC (pins + timing)
-├── sim/                      # Testbenches + run_sim.tcl
-├── build/                    # Build scripts + reports + bit/xsa
-│   ├── tcl/                  # Vivado batch scripts
-│   ├── scripts/              # Golden model, ROM generators
-│   ├── reports/              # Timing / utilization
+├── src/                      设计源码
+│   ├── rtl/                  Verilog（top / eth / video / process / axi / hdmi）
+│   ├── ps/                   裸机控制（UART + GPIO）
+│   ├── host/                 上位机 UDP 推流
+│   └── constraints/          管脚与时序约束
+├── sim/                      仿真脚本与测试台
+├── build/                    构建脚本、报告、bit / xsa
+│   ├── tcl/
+│   ├── scripts/
+│   ├── reports/
 │   ├── system.bit
 │   └── system.xsa
-├── board/                    # Board bring-up notes
-├── data/golden/              # Reference images
-├── skill/                    # Reusable skills
-└── report/                   # Design docs, issues, PS vs PL, competition
+├── board/                    上板说明
+├── data/golden/              金标参考图
+├── skill/                    可复用技能包
+└── report/                   设计文档与问题记录
 ```
-
-**Mapping from older layout (if you used it):**
-
-| Old | New |
-|-----|-----|
-| `rtl/` | `src/rtl/` |
-| `sw/ps/` | `src/ps/` |
-| `sw/host/` | `src/host/` |
-| `constraints/` | `src/constraints/` |
-| `tcl/` | `build/tcl/` |
-| `output/` | `build/` |
-| `docs/` | `report/` |
-| `sim_out/` | `data/golden/` |
 
 ---
 
-## Quick start
+## 快速开始
 
-### 1. Build bitstream + XSA
+### 1. 生成比特流与 XSA
 
 ```bat
-cd /d <repo_root>
+cd /d <仓库根目录>
 set VIVADO=D:\Software\Vivado\2025.2.1\Vivado\bin\vivado.bat
 %VIVADO% -mode batch -source build\tcl\build_system_axigpio.tcl
 ```
 
-Outputs: `build/system.bit`, `build/system.xsa`
+产物：`build/system.bit`、`build/system.xsa`
 
-### 2. Program FPGA
+### 2. 下载比特流
 
 ```bat
 %VIVADO% -mode batch -source build\tcl\program_system.tcl
 ```
 
-### 3. PS ELF (needed for UART commands)
+### 3. 下载 PS ELF（串口命令需要）
 
-1. Open Vitis workspace, create Platform from **latest** `build/system.xsa`
-2. Application source: `src/ps/main.c`
+1. 用 Vitis 打开工作区，Platform 使用最新 `build/system.xsa`
+2. 应用源码：`src/ps/main.c`
 3. Build → Run
 
-> After programming the bitstream the PS is reset. You must **Run** the ELF again for UART.
+> 下载 bit 后 PS 会复位，必须再 Run 一次 ELF，串口才有效。
 
-### 4. Stream video
+### 4. 推流
 
 ```bat
-:: PC NIC 192.168.1.100/24, cable to PL ETH port
+:: PC 网卡 192.168.1.100/24，网线接板卡 PL 网口
 src\host\run_sender.bat
-:: or
+:: 或真实视频
 src\host\run_video.bat D:\path\to\video.mp4
 ```
 
 ---
 
-## UART commands (115200 8N1, send CR+LF)
+## 串口命令（115200 8N1，发送加 CR+LF）
 
-| Command | Action |
-|---------|--------|
-| `00000` | All effects off |
-| `10000` | Grayscale |
-| `01000` | Binarize |
-| `00111` | Blur+Sobel+Invert |
-| `SRC0` / `SRC1` | Colorbar / DDR |
-| `TH80` | Threshold |
-| `FILL` | Diagnostic pattern |
-| `STAT` | Status |
+| 命令 | 作用 |
+|------|------|
+| `00000` | 关闭全部效果 |
+| `10000` | 灰度 |
+| `01000` | 二值化 |
+| `00111` | 模糊 + Sobel + 反色 |
+| `SRC0` / `SRC1` | 彩条 / DDR 视频 |
+| `TH80` | 二值化阈值 |
+| `FILL` | 诊断色块 |
+| `STAT` | 状态 |
 
-Effect bits: **gray / binary / blur / sobel / invert** (left = bit0)
+效果位顺序：**gray / binary / blur / sobel / invert**（左起 bit0）
 
-ETH packets auto-switch the display path (`src_use`); `SRC1` is optional.
+ETH 收到包后会**自动切到视频画面**，不依赖 `SRC1`。
 
 ---
 
-## UDP protocol (host ↔ board)
+## UDP 协议（上位机 ↔ 板卡）
 
 ```
-[u32 LE byte_offset][RGB565 payload]
+[u32 小端 byte_offset][RGB565 载荷]
 ```
 
-- Frame: 512×300×2 = 307200 bytes  
-- Payload per packet ≤ 1396 bytes  
-- Host: `src/host/video_sender.py`  
-- Board: `src/rtl/eth/frame_reasm.v` writes `BRAM[offset/2]`  
-- Bad frames: drop, no retransmit; next frame recovers  
+- 一帧：512×300×2 = 307200 字节
+- 每包载荷 ≤ 1396 字节
+- 板端按 offset 写入帧缓，乱序可拼对
+- 坏帧丢弃、不重传，下一帧自动恢复
 
 ---
 
-## Documentation
+## 文档索引
 
-| File | Content |
-|------|---------|
-| [report/ARCHITECTURE.md](report/ARCHITECTURE.md) | Data path, clocks, bandwidth |
-| [report/MODULES.md](report/MODULES.md) | Module details |
-| [report/ISSUES.md](report/ISSUES.md) | Problems and fixes |
-| [report/PS_VS_PL.md](report/PS_VS_PL.md) | PS vs PL, rotate+filter redesign |
-| [report/ETH_BRINGUP.md](report/ETH_BRINGUP.md) | Ethernet bring-up |
-| [report/ROTATION_AND_EFFECTS.md](report/ROTATION_AND_EFFECTS.md) | Target-domain 3×3 filters |
-| [report/PERF_REPORT.md](report/PERF_REPORT.md) | Performance comparison |
-| [report/COMPETITION.md](report/COMPETITION.md) | Submission checklist |
-| [skill/README.md](skill/README.md) | Skill pack |
+| 文件 | 内容 |
+|------|------|
+| [report/ARCHITECTURE.md](report/ARCHITECTURE.md) | 数据通路、时钟、带宽 |
+| [report/MODULES.md](report/MODULES.md) | 各模块详解 |
+| [report/ISSUES.md](report/ISSUES.md) | 问题定位与修复 |
+| [report/PS_VS_PL.md](report/PS_VS_PL.md) | PS/PL 划分、旋转窗滤方案对比 |
+| [report/ETH_BRINGUP.md](report/ETH_BRINGUP.md) | 以太网上板 |
+| [report/ROTATION_AND_EFFECTS.md](report/ROTATION_AND_EFFECTS.md) | 目标域窗口滤波 |
+| [report/PERF_REPORT.md](report/PERF_REPORT.md) | 性能对比 |
+| [report/COMPETITION.md](report/COMPETITION.md) | 竞赛提交清单 |
+| [skill/README.md](skill/README.md) | 技能包 |
 
 ---
 
-## Key design notes
+## 关键设计摘要
 
-- **PL protocol stack**: RGMII → ARP/ICMP/UDP → offset reassembly → BRAM  
-- **PS control only**: UART → AXI GPIO → effect enables  
-- **Target-domain filters**: blur/sobel work at any rotation angle (no bypass)  
-- **OSD**: three lines FPS / ANG / EN on top-left  
-- **Host protocol unchanged**; plug the cable into the **PL** Ethernet port  
-
-See `report/ISSUES.md` for the full debug log.
+- **PL 硬件协议栈**：RGMII → ARP/ICMP/UDP → offset 拼帧 → 帧缓  
+- **PS 只做控制**：UART → AXI GPIO → 效果使能  
+- **目标域窗滤**：任意旋转角下 blur/sobel 可用（不再旁路）  
+- **OSD**：左上角三行状态（FPS / ANG / EN）  
+- **上位机协议不变**；网线需接 **PL 网口**
